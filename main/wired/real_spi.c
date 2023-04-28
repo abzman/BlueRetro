@@ -146,6 +146,13 @@ static void load_buffer(void) {
                 data += 4;
                 size += 4;
                 break;
+            case DEV_KB:
+                /* Silly control pad (arcade): 0xC0 0x00 id, then one byte of buttons */
+                memcpy(data, wired_adapter.data[i].output, 2);
+                data[2] = wired_adapter.data[i].output[2] & wired_adapter.data[i].output_mask[2];
+                data += 3;
+                size += 3;
+                break;
         }
     }
     write_buffer(buffer, size);

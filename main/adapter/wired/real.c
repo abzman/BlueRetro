@@ -45,6 +45,14 @@ enum {
     REAL_FS_P,
 };
 
+enum {
+    REAL_SILLY_SERVICE = 0,
+    REAL_SILLY_P1_START,
+    REAL_SILLY_P2_START,
+    REAL_SILLY_P2_COIN,
+    REAL_SILLY_P1_COIN,
+};
+
 static DRAM_ATTR const uint8_t real_mouse_axes_idx[ADAPTER_MAX_AXES] =
 {
 /*  AXIS_LX, AXIS_LY, AXIS_RX, AXIS_RY, TRIG_L, TRIG_R  */
@@ -86,6 +94,11 @@ struct real_mouse_map {
     uint8_t buttons;
     uint8_t relative[2];
     int32_t raw_axes[2];
+} __packed;
+
+struct real_silly_map {
+    uint8_t ids[2];
+    uint8_t buttons;
 } __packed;
 
 static const uint32_t real_mask[4] = {0x33770F00, 0x00000000, 0x00000000, BR_COMBO_MASK};
@@ -147,6 +160,19 @@ static void real_ctrl_special_action(struct wired_ctrl *ctrl_data, struct wired_
     }
 }
 
+static const uint32_t real_silly_mask[4] = {0x33370F00, 0x00000000, 0x00000000, BR_COMBO_MASK};
+static const uint32_t real_silly_desc[4] = {0x00000000, 0x00000000, 0x00000000, 0x00000000};
+static DRAM_ATTR const uint32_t real_silly_btns_mask[32] = {
+    0, 0, 0, 0,
+    0, 0, 0, 0,
+    BIT(REAL_SILLY_P1_START), BIT(REAL_SILLY_P2_START), BIT(REAL_SILLY_P1_COIN), BIT(REAL_SILLY_P2_COIN),
+    0, 0, 0, 0,
+    0, 0, 0, 0,
+    BIT(REAL_SILLY_SERVICE), 0, 0, 0,
+    0, 0, 0, 0,
+    0, 0, 0, 0,
+};
+
 void IRAM_ATTR real_init_buffer(int32_t dev_mode, struct wired_data *wired_data) {
     switch (dev_mode) {
         case DEV_MOUSE:
@@ -159,6 +185,16 @@ void IRAM_ATTR real_init_buffer(int32_t dev_mode, struct wired_data *wired_data)
                 map->raw_axes[i] = 0;
                 map->relative[i] = 1;
             }
+            break;
+        }
+        case DEV_KB:
+        {
+            struct real_silly_map *map = (struct real_silly_map *)wired_data->output;
+
+            map->ids[0] = 0xC0;
+            map->ids[1] = 0x00;
+            map->buttons = 0x0000;
+            memset(wired_data->output_mask, 0xFF, sizeof(struct real_silly_map));
             break;
         }
         case DEV_PAD_ALT:
@@ -197,6 +233,10 @@ void real_meta_init(struct wired_ctrl *ctrl_data) {
                     ctrl_data[i].mask = real_mouse_mask;
                     ctrl_data[i].desc = real_mouse_desc;
                     ctrl_data[i].axes[j].meta = &real_mouse_axes_meta[j];
+                    break;
+                case DEV_KB:
+                    ctrl_data[i].mask = real_silly_mask;
+                    ctrl_data[i].desc = real_silly_desc;
                     break;
                 case DEV_PAD_ALT:
                     ctrl_data[i].mask = real_fs_mask;
@@ -342,6 +382,33 @@ static void real_mouse_from_generic(struct wired_ctrl *ctrl_data, struct wired_d
     memcpy(wired_data->output, (void *)&map_tmp, sizeof(map_tmp) - 8);
 }
 
+static void real_silly_from_generic(struct wired_ctrl *ctrl_data, struct wired_data *wired_data) {
+    struct real_silly_map map_tmp;
+    uint32_t map_mask = 0xFFFF;
+
+    memcpy((void *)&map_tmp, wired_data->output, sizeof(map_tmp));
+
+    for (uint32_t i = 0; i < ARRAY_SIZE(generic_btns_mask); i++) {
+        if (ctrl_data->map_mask[0] & BIT(i)) {
+            if (ctrl_data->btns[0].value & generic_btns_mask[i]) {
+                map_tmp.buttons |= real_silly_btns_mask[i];
+                map_mask &= ~real_silly_btns_mask[i];
+                wired_data->cnt_mask[i] = ctrl_data->btns[0].cnt_mask[i];
+            }
+            else if (map_mask & real_silly_btns_mask[i]) {
+                map_tmp.buttons &= ~real_silly_btns_mask[i];
+                wired_data->cnt_mask[i] = 0;
+            }
+        }
+    }
+
+    memcpy(wired_data->output, (void *)&map_tmp, sizeof(map_tmp));
+
+#ifdef CONFIG_BLUERETRO_RAW_OUTPUT
+    printf("{\"log_type\": \"wired_output\", \"btns\": %d}\n", map_tmp.buttons);
+#endif
+}
+
 void real_from_generic(int32_t dev_mode, struct wired_ctrl *ctrl_data, struct wired_data *wired_data) {
     switch (dev_mode) {
         case DEV_MOUSE:
@@ -349,6 +416,9 @@ void real_from_generic(int32_t dev_mode, struct wired_ctrl *ctrl_data, struct wi
             break;
         case DEV_PAD_ALT:
             real_fs_from_generic(ctrl_data, wired_data);
+            break;
+        case DEV_KB:
+            real_silly_from_generic(ctrl_data, wired_data);
             break;
         default:
             real_ctrl_from_generic(ctrl_data, wired_data);
