@@ -44,6 +44,7 @@ enum {
     BT_SW2,
     BT_STEAM,
     BT_PBP,
+    BT_SINPUT,
     BT_TYPE_MAX,
 };
 

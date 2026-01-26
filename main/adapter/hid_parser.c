@@ -649,7 +649,7 @@ void hid_parser(struct bt_data *bt_data, uint8_t *data, uint32_t len) {
     TESTS_CMDS_LOG("],\n");
 
     /* Free reports for non-generic devices */
-    if (bt_data->base.pids->type > BT_HID_GENERIC) {
+    if (bt_data->base.pids->type > BT_HID_GENERIC && bt_data->base.pids->type != BT_SINPUT) {
         hid_parser_free_reports(bt_data->base.pids->id);
     }
 }

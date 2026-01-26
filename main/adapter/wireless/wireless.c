@@ -23,6 +23,7 @@ static to_generic_t to_generic_func[BT_TYPE_MAX] = {
     sw2_to_generic, /* BT_SW2 */
     steam_to_generic, /* BT_STEAM */
     pbp_to_generic,  /* BT_PBP */
+    hid_to_generic, /* BT_SINPUT */
 };
 
 static fb_from_generic_t fb_from_generic_func[BT_TYPE_MAX] = {
@@ -34,6 +35,7 @@ static fb_from_generic_t fb_from_generic_func[BT_TYPE_MAX] = {
     sw2_fb_from_generic, /* BT_SW2 */
     steam_fb_from_generic, /* BT_STEAM */
     pbp_fb_from_generic,  /* BT_PBP */
+    hid_fb_from_generic, /* BT_SINPUT */
 };
 
 int32_t wireless_to_generic(struct bt_data *bt_data, struct wireless_ctrl *ctrl_data) {

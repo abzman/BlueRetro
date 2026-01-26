@@ -221,7 +221,7 @@ void bt_l2cap_sig_hdlr(struct bt_dev *device, struct bt_hci_pkt *bt_hci_acl_pkt)
         case BT_L2CAP_CONN_RSP:
         {
             struct bt_l2cap_conn_rsp *conn_rsp = (struct bt_l2cap_conn_rsp *)bt_hci_acl_pkt->sig_data;
-            printf("# BT_L2CAP_CONN_RSP\n");
+            printf("# BT_L2CAP_CONN_RSP (result=%d, status=%d)\n", conn_rsp->result, conn_rsp->status);
             if (conn_rsp->result == BT_L2CAP_BR_SUCCESS && conn_rsp->status == BT_L2CAP_CS_NO_INFO) {
                 if (conn_rsp->scid == device->sdp_tx_chan.scid) {
                     device->sdp_tx_chan.dcid = conn_rsp->dcid;
@@ -297,7 +297,10 @@ void bt_l2cap_sig_hdlr(struct bt_dev *device, struct bt_hci_pkt *bt_hci_acl_pkt)
                 }
                 else {
                     atomic_set_bit(&device->flags, BT_DEV_HID_INTR_READY);
-                    bt_l2cap_cmd_sdp_conn_req(device);
+                    /* SInput pads already had their SDP request before HID */
+                    if (device->ids.type != BT_SINPUT) {
+                        bt_l2cap_cmd_sdp_conn_req(device);
+                    }
                     bt_hid_init(device);
                 }
             }
@@ -341,7 +344,10 @@ void bt_l2cap_sig_hdlr(struct bt_dev *device, struct bt_hci_pkt *bt_hci_acl_pkt)
                 }
                 else {
                     atomic_set_bit(&device->flags, BT_DEV_HID_INTR_READY);
-                    bt_l2cap_cmd_sdp_conn_req(device);
+                    /* SInput pads already had their SDP request before HID */
+                    if (device->ids.type != BT_SINPUT) {
+                        bt_l2cap_cmd_sdp_conn_req(device);
+                    }
                     bt_hid_init(device);
                 }
             }
@@ -367,6 +373,19 @@ void bt_l2cap_sig_hdlr(struct bt_dev *device, struct bt_hci_pkt *bt_hci_acl_pkt)
         }
         case BT_L2CAP_DISCONN_RSP:
             printf("# BT_L2CAP_DISCONN_RSP\n");
+
+            /* SInput (esp-idf / Bluedroid) pads: SDP went first, open the
+             * HID channels once the SDP channel is closed. Only for that
+             * channel and only before HID is up, so tearing down HID
+             * channels later doesn't start a new connection. */
+            if (device->ids.type == BT_SINPUT
+                    && !atomic_test_bit(&device->flags, BT_DEV_HID_INTR_READY)) {
+                struct bt_l2cap_disconn_rsp *disconn_rsp = (struct bt_l2cap_disconn_rsp *)bt_hci_acl_pkt->sig_data;
+                if (disconn_rsp->scid == device->sdp_tx_chan.scid) {
+                    bt_l2cap_cmd_hid_ctrl_conn_req(device);
+                }
+            }
+
             break;
         case BT_L2CAP_INFO_RSP:
             printf("# BT_L2CAP_INFO_RSP\n");

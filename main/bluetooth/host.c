@@ -902,7 +902,7 @@ void bt_host_bridge(struct bt_dev *device, uint8_t report_id, uint8_t *data, uin
     }
     printf("\n");
 #else
-    if (device->ids.type == BT_HID_GENERIC) {
+    if (device->ids.type == BT_HID_GENERIC || device->ids.type == BT_SINPUT) {
         struct hid_report *report = hid_parser_get_report(device->ids.id, report_id);
         if (report == NULL || report->type == REPORT_NONE) {
             /* Descriptor-less pad posing as an Xbox controller (GameSir Nova

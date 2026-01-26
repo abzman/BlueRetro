@@ -1847,7 +1847,15 @@ void bt_hci_evt_hdlr(struct bt_hci_pkt *bt_hci_evt_pkt) {
                         if (atomic_test_bit(&device->flags, BT_DEV_ENCRYPTION)) {
                             bt_hci_cmd_set_conn_encrypt(&device->acl_handle);
                         }
-                        bt_l2cap_cmd_hid_ctrl_conn_req(device);
+
+                        /* SInput (esp-idf / Bluedroid) pads want SDP before
+                         * the HID channels, see BT_L2CAP_DISCONN_RSP */
+                        if (device->ids.type == BT_SINPUT) {
+                            bt_l2cap_cmd_sdp_conn_req(device);
+                        }
+                        else {
+                            bt_l2cap_cmd_hid_ctrl_conn_req(device);
+                        }
                     }
                 }
             }
@@ -1878,7 +1886,7 @@ void bt_hci_evt_hdlr(struct bt_hci_pkt *bt_hci_evt_pkt) {
                 else {
                     bt_hid_set_type_flags_from_name(device, (char *)remote_name_req_complete->name);
                     bt_hci_stop_inquiry();
-                    if (device->ids.type == BT_HID_GENERIC || device->ids.type == BT_SW) {
+                    if (device->ids.type == BT_HID_GENERIC || device->ids.type == BT_SW || device->ids.type == BT_SINPUT) {
                         bt_hci_cmd_read_remote_features(&device->acl_handle);
                     }
                     if (device->ids.type == BT_PS3 || device->ids.subtype == BT_WIIU_PRO) {
