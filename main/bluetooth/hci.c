@@ -23,6 +23,7 @@
 #include "zephyr/uuid.h"
 
 #define BT_INQUIRY_MAX 10
+#define BT_HCI_LE_ADV_RSSI_SIZE 1
 
 /* Generous on purpose. Dropping a controller that is merely slow to initialise
  * is far worse than letting a phone sit on a port a few seconds longer. */
@@ -73,6 +74,13 @@ static uint32_t inquiry_state = 0;
 static uint32_t inquiry_override = 0;
 static RingbufHandle_t randq_hdl, encryptq_hdl;
 static char local_name[24] = "BlueRetro";
+
+enum bt_hci_le_adv_connect_reason {
+    BT_HCI_LE_ADV_CONNECT_NONE = 0,
+    BT_HCI_LE_ADV_CONNECT_DISCOVERY,
+    BT_HCI_LE_ADV_CONNECT_DIRECTED,
+    BT_HCI_LE_ADV_CONNECT_BONDED,
+};
 
 static void bt_hci_cmd(uint16_t opcode, uint32_t cp_len);
 //static void bt_hci_cmd_inquiry(void *cp);
@@ -157,6 +165,13 @@ static void bt_hci_cmd_le_rand(void);
 static void bt_hci_cmd_le_start_encryption(uint16_t handle, uint64_t rand, uint16_t ediv, uint8_t *ltk);
 //static void bt_hci_cmd_le_set_ext_scan_param(void *cp);
 //static void bt_hci_cmd_le_set_ext_scan_enable(void *cp);
+static enum bt_hci_le_adv_connect_reason bt_hci_get_le_adv_connect_reason(const struct bt_hci_evt_le_advertising_info *adv_info,
+    uint16_t *adv_pid);
+static const struct bt_hci_evt_le_advertising_info *bt_hci_get_le_adv_connect_candidate(
+    const struct bt_hci_evt_le_advertising_report *le_adv_report, uint32_t report_len,
+    enum bt_hci_le_adv_connect_reason *reason, uint16_t *adv_pid);
+static void bt_hci_connect_le_adv_candidate(const struct bt_hci_evt_le_advertising_info *adv_info,
+    enum bt_hci_le_adv_connect_reason reason, uint16_t adv_pid);
 static void bt_hci_le_meta_evt_hdlr(struct bt_hci_pkt *bt_hci_evt_pkt);
 static void bt_hci_start_inquiry_cfg_check(void *cp);
 static void bt_hci_load_le_accept_list(void *cp);
@@ -1078,6 +1093,169 @@ static void bt_hci_cmd_le_set_ext_scan_enable(void *cp) {
 }
 #endif
 
+static const char *bt_hci_get_le_adv_connect_reason_str(enum bt_hci_le_adv_connect_reason reason) {
+    switch (reason) {
+        case BT_HCI_LE_ADV_CONNECT_DISCOVERY:
+            return "discovery";
+        case BT_HCI_LE_ADV_CONNECT_DIRECTED:
+            return "directed";
+        case BT_HCI_LE_ADV_CONNECT_BONDED:
+            return "bonded";
+        case BT_HCI_LE_ADV_CONNECT_NONE:
+        default:
+            return "none";
+    }
+}
+
+static enum bt_hci_le_adv_connect_reason bt_hci_get_le_adv_connect_reason(const struct bt_hci_evt_le_advertising_info *adv_info,
+    uint16_t *adv_pid) {
+    const uint8_t *data = adv_info->data;
+    const uint8_t *end = data + adv_info->length;
+
+    *adv_pid = 0;
+
+    if (adv_info->evt_type == BT_LE_ADV_IND
+            && bt_host_load_le_ltk((bt_addr_le_t *)&adv_info->addr, NULL, NULL) == 0) {
+        return BT_HCI_LE_ADV_CONNECT_BONDED;
+    }
+
+    if (adv_info->evt_type == BT_LE_ADV_DIRECT_IND) {
+        return BT_HCI_LE_ADV_CONNECT_DIRECTED;
+    }
+
+    while (data < end) {
+        uint8_t len = *data++;
+        uint16_t value;
+
+        if (!len) {
+            break;
+        }
+
+        if ((data + len) > end) {
+            break;
+        }
+
+        switch (data[0]) {
+            case BT_DATA_GAP_APPEARANCE:
+                /* HID category */
+                if (len >= 3) {
+                    value = data[1] | (data[2] << 8);
+                    if ((value >> 6) == 0x00F && (value & 0x3F) > 0 && (value & 0x3F) < 5) {
+                        return BT_HCI_LE_ADV_CONNECT_DISCOVERY;
+                    }
+                    return BT_HCI_LE_ADV_CONNECT_NONE;
+                }
+                break;
+            case BT_DATA_MANUFACTURER_DATA:
+                /* Manufacturer Specific Data */
+                if (len >= 8) {
+                    value = data[1] | (data[2] << 8);
+                    if (value == 0x0553) {
+                        /* ndeadly numbers the manufacturer data from the
+                         * company ID byte; data[] here starts one earlier, at
+                         * the AD type byte, so data[n + 1] is his offset n.
+                         * VID sits at his 0x5, PID at his 0x7. */
+                        uint16_t vid = data[6] | (data[7] << 8);
+                        if (vid == 0x057e) {
+                            if (len >= 10) {
+                                *adv_pid = data[8] | (data[9] << 8);
+                            }
+                            return BT_HCI_LE_ADV_CONNECT_DISCOVERY;
+                        }
+                    }
+                }
+                break;
+        }
+        data += len;
+    }
+
+    return BT_HCI_LE_ADV_CONNECT_NONE;
+}
+
+static const struct bt_hci_evt_le_advertising_info *bt_hci_get_le_adv_connect_candidate(
+    const struct bt_hci_evt_le_advertising_report *le_adv_report, uint32_t report_len,
+    enum bt_hci_le_adv_connect_reason *reason, uint16_t *adv_pid) {
+    const struct bt_hci_evt_le_advertising_info *candidate = NULL;
+    uint16_t candidate_pid = 0;
+    enum bt_hci_le_adv_connect_reason candidate_reason = BT_HCI_LE_ADV_CONNECT_NONE;
+    const uint8_t *data = (const uint8_t *)le_adv_report->adv_info;
+    const uint8_t *end = (const uint8_t *)le_adv_report + report_len;
+
+    for (uint8_t i = 0; i < le_adv_report->num_reports && data < end; i++) {
+        const struct bt_hci_evt_le_advertising_info *adv_info;
+        /* Legacy LE advertising reports store RSSI right after the variable-length AD payload. */
+        uint32_t adv_len;
+        enum bt_hci_le_adv_connect_reason adv_reason;
+
+        if ((data + sizeof(struct bt_hci_evt_le_advertising_info)) > end) {
+            printf("# LE ADV header parse error idx: %u remaining: %lu\n", i, (uint32_t)(end - data));
+            break;
+        }
+
+        adv_info = (const struct bt_hci_evt_le_advertising_info *)data;
+        adv_len = sizeof(*adv_info) + adv_info->length + BT_HCI_LE_ADV_RSSI_SIZE;
+        if ((data + adv_len) > end) {
+            printf("# LE ADV parse error idx: %u len: %lu remaining: %lu\n", i,
+                adv_len, (uint32_t)(end - data));
+            break;
+        }
+
+        uint16_t pid;
+        adv_reason = bt_hci_get_le_adv_connect_reason(adv_info, &pid);
+        /* Something that already failed to pair is not worth a device
+         * slot; each attempt costs a real controller its port. */
+        if (adv_reason != BT_HCI_LE_ADV_CONNECT_NONE
+                && bt_host_le_is_pair_failed((bt_addr_le_t *)&adv_info->addr)) {
+            adv_reason = BT_HCI_LE_ADV_CONNECT_NONE;
+        }
+        if (adv_reason > candidate_reason) {
+            candidate = adv_info;
+            candidate_reason = adv_reason;
+            candidate_pid = pid;
+            if (adv_reason == BT_HCI_LE_ADV_CONNECT_BONDED) {
+                break;
+            }
+        }
+
+        data += adv_len;
+    }
+
+    *reason = candidate_reason;
+    *adv_pid = candidate_pid;
+    return candidate;
+}
+
+static void bt_hci_connect_le_adv_candidate(const struct bt_hci_evt_le_advertising_info *adv_info,
+    enum bt_hci_le_adv_connect_reason reason, uint16_t adv_pid) {
+    struct bt_dev *device = NULL;
+    uint8_t bdaddr[sizeof(adv_info->addr.a.val)];
+
+    memcpy(bdaddr, adv_info->addr.a.val, sizeof(bdaddr));
+    bt_host_get_dev_from_bdaddr(bdaddr, &device);
+    if (device == NULL) {
+        (void)bt_host_get_new_dev(&device);
+        if (device) {
+            bt_host_reset_dev(device);
+            memcpy((uint8_t *)&device->le_remote_bdaddr, (uint8_t *)&adv_info->addr, sizeof(device->le_remote_bdaddr));
+            device->le_adv_pid = adv_pid;
+            device->ids.type = BT_HID_GENERIC;
+            bt_l2cap_init_dev_scid(device);
+            atomic_set_bit(&device->flags, BT_DEV_DEVICE_FOUND);
+            bt_hci_cmd_le_set_scan_enable(0);
+            bt_hci_cmd_le_set_adv_disable(NULL);
+            bt_hci_cmd_le_create_conn((void *)&adv_info->addr);
+            printf("LE ADV dev: %ld type: %ld reason: %s bdaddr: %02X - %02X:%02X:%02X:%02X:%02X:%02X\n",
+                device->ids.id, device->ids.type, bt_hci_get_le_adv_connect_reason_str(reason), device->le_remote_bdaddr.type,
+                device->remote_bdaddr[5], device->remote_bdaddr[4], device->remote_bdaddr[3],
+                device->remote_bdaddr[2], device->remote_bdaddr[1], device->remote_bdaddr[0]);
+            bt_mon_log(true, "LE ADV dev: %ld type: %ld reason: %s bdaddr: %02X - %02X:%02X:%02X:%02X:%02X:%02X\n",
+                device->ids.id, device->ids.type, bt_hci_get_le_adv_connect_reason_str(reason), device->le_remote_bdaddr.type,
+                device->remote_bdaddr[5], device->remote_bdaddr[4], device->remote_bdaddr[3],
+                device->remote_bdaddr[2], device->remote_bdaddr[1], device->remote_bdaddr[0]);
+        }
+    }
+}
+
 static void bt_hci_le_meta_evt_hdlr(struct bt_hci_pkt *bt_hci_evt_pkt) {
     struct bt_hci_evt_le_meta_event *le_meta_event = (struct bt_hci_evt_le_meta_event *)bt_hci_evt_pkt->evt_data;
     struct bt_dev *device = NULL;
@@ -1190,85 +1368,21 @@ static void bt_hci_le_meta_evt_hdlr(struct bt_hci_pkt *bt_hci_evt_pkt) {
         {
             struct bt_hci_evt_le_advertising_report *le_adv_report =
                 (struct bt_hci_evt_le_advertising_report *)(bt_hci_evt_pkt->evt_data + sizeof(struct bt_hci_evt_le_meta_event));
-                uint8_t *data = le_adv_report->adv_info[0].data;
-                uint8_t *end = data + le_adv_report->adv_info[0].length;
-                uint8_t len, type;
-                uint16_t value;
-                uint16_t adv_pid = 0;
+            enum bt_hci_le_adv_connect_reason reason = BT_HCI_LE_ADV_CONNECT_NONE;
+            uint16_t adv_pid = 0;
+            const struct bt_hci_evt_le_advertising_info *candidate = NULL;
+            uint32_t report_len = bt_hci_evt_pkt->evt_hdr.len - sizeof(struct bt_hci_evt_le_meta_event);
 
-                printf("# BT_HCI_EVT_LE_ADVERTISING_REPORT\n");
-
-                if (le_adv_report->adv_info[0].evt_type == BT_LE_ADV_IND) {
-                    if (bt_host_load_le_ltk(&le_adv_report->adv_info[0].addr, NULL, NULL) == 0) {
-                        goto connect;
-                    }
-                }
-                if (le_adv_report->adv_info[0].evt_type == BT_LE_ADV_DIRECT_IND) {
-                    goto connect;
-                }
-
-                /* Filter HID device */
-                while (data < end) {
-                    len = *data++;
-                    type = *data;
-                    switch (type) {
-                        case BT_DATA_GAP_APPEARANCE:
-                            /* HID category */
-                            value = *(uint16_t *)&data[1];
-                            if ((value >> 6) == 0x00F && (value & 0x3F) > 0 && (value & 0x3F) < 5) {
-                                goto connect;
-                            }
-                            else {
-                                goto skip;
-                            }
-                            break;
-                        case BT_DATA_MANUFACTURER_DATA:
-                            /* Manufacturer Specific Data */
-                            value = *(uint16_t *)&data[1];
-                            if (value == 0x0553) {
-                                /* ndeadly numbers the manufacturer data from the
-                                 * company ID byte; data[] here starts one earlier, at
-                                 * the AD type byte, so data[n + 1] is his offset n.
-                                 * VID sits at his 0x5, PID at his 0x7. */
-                                uint16_t vid = *(uint16_t *)&data[6];
-                                if (vid == 0x057e) {
-                                    adv_pid = *(uint16_t *)&data[8];
-                                    goto connect;
-                                }
-                            }
-                            break;
-                    }
-                    data += len;
-                }
-                goto skip;
-connect:
-                /* Something that already failed to pair is not worth a device
-                 * slot; each attempt costs a real controller its port. */
-                if (bt_host_le_is_pair_failed(&le_adv_report->adv_info[0].addr)) {
-                    goto skip;
-                }
-                bt_host_get_dev_from_bdaddr(le_adv_report->adv_info[0].addr.a.val, &device);
-                if (device == NULL) {
-                    (void)bt_host_get_new_dev(&device);
-                    if (device) {
-                        bt_host_reset_dev(device);
-                        memcpy((uint8_t *)&device->le_remote_bdaddr, (uint8_t *)&le_adv_report->adv_info[0].addr, sizeof(device->le_remote_bdaddr));
-                        device->le_adv_pid = adv_pid;
-                        device->ids.type = BT_HID_GENERIC;
-                        bt_l2cap_init_dev_scid(device);
-                        atomic_set_bit(&device->flags, BT_DEV_DEVICE_FOUND);
-                        bt_hci_cmd_le_set_scan_enable(0);
-                        bt_hci_cmd_le_set_adv_disable(NULL);
-                        bt_hci_cmd_le_create_conn((void *)&le_adv_report->adv_info[0].addr);
-                        printf("LE ADV dev: %ld type: %ld bdaddr: %02X - %02X:%02X:%02X:%02X:%02X:%02X\n", device->ids.id, device->ids.type, device->le_remote_bdaddr.type,
-                            device->remote_bdaddr[5], device->remote_bdaddr[4], device->remote_bdaddr[3],
-                            device->remote_bdaddr[2], device->remote_bdaddr[1], device->remote_bdaddr[0]);
-                        bt_mon_log(true, "LE ADV dev: %ld type: %ld bdaddr: %02X - %02X:%02X:%02X:%02X:%02X:%02X\n", device->ids.id, device->ids.type, device->le_remote_bdaddr.type,
-                            device->remote_bdaddr[5], device->remote_bdaddr[4], device->remote_bdaddr[3],
-                            device->remote_bdaddr[2], device->remote_bdaddr[1], device->remote_bdaddr[0]);
-                    }
-                }
-skip:
+            printf("# BT_HCI_EVT_LE_ADVERTISING_REPORT num_reports: %d\n", le_adv_report->num_reports);
+            bt_mon_log(true, "# BT_HCI_EVT_LE_ADVERTISING_REPORT num_reports: %d\n", le_adv_report->num_reports);
+            candidate = bt_hci_get_le_adv_connect_candidate(le_adv_report, report_len, &reason, &adv_pid);
+            if (candidate) {
+                printf("# LE ADV selected reason: %s addr_type: %02X\n",
+                    bt_hci_get_le_adv_connect_reason_str(reason), candidate->addr.type);
+                bt_mon_log(true, "# LE ADV selected reason: %s addr_type: %02X\n",
+                    bt_hci_get_le_adv_connect_reason_str(reason), candidate->addr.type);
+                bt_hci_connect_le_adv_candidate(candidate, reason, adv_pid);
+            }
             break;
         }
         case BT_HCI_EVT_LE_CONN_UPDATE_COMPLETE:
