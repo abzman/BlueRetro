@@ -117,6 +117,21 @@ static const uint32_t sega_mouse_btns_mask[32] = {
 
 static const uint32_t saturn_kb_mask[4] = {0xE6FF0F0F, 0xFFFFFFFF, 0xFFFFFFFF, 0x0007FFFF | BR_COMBO_MASK};
 static const uint32_t saturn_kb_desc[4] = {0x00000000, 0x00000000, 0x00000000, 0x00000000};
+static DRAM_ATTR const uint16_t saturn_kb_btns_mask[KBM_MAX] = {
+    [KB_RIGHT] = BIT(SATURN_LD_RIGHT),
+    [KB_LEFT] = BIT(SATURN_LD_LEFT),
+    [KB_DOWN] = BIT(SATURN_LD_DOWN),
+    [KB_UP] = BIT(SATURN_LD_UP),
+    [KB_ESC] = BIT(SATURN_START),
+    [KB_Z] = BIT(SATURN_A),
+    [KB_X] = BIT(SATURN_B),
+    [KB_C] = BIT(SATURN_C),
+    [KB_A] = BIT(SATURN_X),
+    [KB_S] = BIT(SATURN_Y),
+    [KB_D] = BIT(SATURN_Z),
+    [KB_Q] = BIT(SATURN_L),
+    [KB_E] = BIT(SATURN_R),
+};
 static const uint8_t saturn_kb_scancode[KBM_MAX] = {
  /* Source: https://plutiedev.com/saturn-keyboard */
  /* KB_A, KB_D, KB_S, KB_W, MOUSE_X_LEFT, MOUSE_X_RIGHT, MOUSE_Y_DOWN MOUSE_Y_UP */
@@ -350,17 +365,21 @@ static void saturn_kb_from_generic(struct wired_ctrl *ctrl_data, struct wired_da
 
     if (!atomic_test_bit(&wired_data->flags, WIRED_KBMON_INIT)) {
         kbmon_init(ctrl_data->index, saturn_kb_id_to_scancode);
+        kbmon_set_typematic(ctrl_data->index, 1, 500000, 33333);
         atomic_set_bit(&wired_data->flags, WIRED_KBMON_INIT);
     }
 
-    /* Use BlueRetro KB/Gamepad mapping here */
-    for (uint32_t i = 0; i < ARRAY_SIZE(generic_btns_mask); i++) {
-        if (ctrl_data->map_mask[0] & BIT(i)) {
-            if (ctrl_data->btns[0].value & generic_btns_mask[i]) {
-                buttons &= ~saturn_btns_mask[i];
+    for (uint32_t i = 0; i < KBM_MAX; i++) {
+        uint8_t btn_idx = i >> 5;
+        uint32_t btn_mask = BIT(i & 0x1F);
+        uint16_t saturn_btn_mask = saturn_kb_btns_mask[i];
+
+        if (saturn_btn_mask && (ctrl_data->map_mask[btn_idx] & btn_mask)) {
+            if (ctrl_data->btns[btn_idx].value & btn_mask) {
+                buttons &= ~saturn_btn_mask;
             }
             else {
-                buttons |= saturn_btns_mask[i];
+                buttons |= saturn_btn_mask;
             }
         }
     }
