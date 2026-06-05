@@ -325,11 +325,11 @@ static void set_sega_mouse(uint8_t port, uint8_t src_port) {
     buffer[0] = 0xFF;
     if (wired_adapter.system_id == GENESIS) {
         memcpy(&buffer[1], &wired_adapter.data[src_port].output[24], 1);
-        load_mouse_axes(port, &buffer[1], &buffer[2]);
+        load_mouse_axes(src_port, &buffer[1], &buffer[2]);
     }
     else {
         memcpy(&buffer[1], wired_adapter.data[src_port].output, 1);
-        load_mouse_axes(port, &buffer[1], &buffer[2]);
+        load_mouse_axes(src_port, &buffer[1], &buffer[2]);
     }
     buffer[4] = ID0_MOUSE >> 4;
 
@@ -342,8 +342,7 @@ static void set_saturn_keyboard(uint8_t port, uint8_t src_port) {
     buffer[0] = (ID2_SATURN_KB << 4) | 4;
     memcpy(&buffer[1], wired_adapter.data[src_port].output, 2);
     if (kbmon_get_code(src_port, &buffer[3], &len)) {
-        buffer[3] = 0x06;
-        buffer[4] = 0x00;
+        memcpy(&buffer[3], &wired_adapter.data[src_port].output[2], 2);
     }
     buffer[5] = ID0_SATURN_THREEWIRE_HANDSHAKE >> 4;
 
@@ -385,8 +384,8 @@ static void set_saturn_multitap(uint8_t port, uint8_t first_port, uint8_t nb_por
                 memcpy(data, wired_adapter.data[j].output, 2);
                 data += 2;
                 if (kbmon_get_code(j, data, &len)) {
-                    buffer[3] = 0x06;
-                    buffer[4] = 0x00;
+                    memcpy(data, &wired_adapter.data[j].output[2], 2);
+                    len = 2;
                 }
                 data += len;
                 break;

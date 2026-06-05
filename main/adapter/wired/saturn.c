@@ -30,6 +30,15 @@ enum {
     SATURN_R,
 };
 
+enum {
+    SATURN_KB_BREAK = BIT(0),
+    SATURN_KB_IDLE = BIT(1) | BIT(2),
+    SATURN_KB_MAKE = BIT(3),
+    SATURN_KB_SCROLL = BIT(4),
+    SATURN_KB_NUM = BIT(5),
+    SATURN_KB_CAPS = BIT(6),
+};
+
 static DRAM_ATTR const uint8_t saturn_axes_idx[ADAPTER_MAX_AXES] =
 {
 /*  AXIS_LX, AXIS_LY, AXIS_RX, AXIS_RY, TRIG_L, TRIG_R  */
@@ -196,7 +205,7 @@ void IRAM_ATTR saturn_init_buffer(int32_t dev_mode, struct wired_data *wired_dat
             struct saturn_map *map = (struct saturn_map *)wired_data->output;
 
             map->buttons = 0xFFFF;
-            map->flags = 0x06;
+            map->flags = SATURN_KB_IDLE;
             map->scancode = 0x00;
             break;
         }
@@ -391,15 +400,42 @@ static void saturn_kb_from_generic(struct wired_ctrl *ctrl_data, struct wired_da
 
 void saturn_kb_id_to_scancode(uint32_t dev_id, uint8_t type, uint8_t id) {
     uint8_t kb_buf[2] = {0};
-    switch (type) {
-        case KBMON_TYPE_MAKE:
-            kb_buf[0] = 0x08;
-            break;
-        case KBMON_TYPE_BREAK:
-            kb_buf[0] = 0x01;
-            break;
-    }
     if (id < KBM_MAX) {
+        uint8_t *flags = &wired_adapter.data[dev_id].output[2];
+        uint8_t *lock_pressed = &wired_adapter.data[dev_id].output[4];
+        uint8_t lock_mask = 0;
+        uint8_t lock_pressed_mask = 0;
+
+        switch (id) {
+            case KB_CAPSLOCK:
+                lock_mask = SATURN_KB_CAPS;
+                lock_pressed_mask = BIT(0);
+                break;
+            case KB_NUMLOCK:
+                lock_mask = SATURN_KB_NUM;
+                lock_pressed_mask = BIT(1);
+                break;
+            case KB_SCROLL:
+                lock_mask = SATURN_KB_SCROLL;
+                lock_pressed_mask = BIT(2);
+                break;
+        }
+
+        switch (type) {
+            case KBMON_TYPE_MAKE:
+                if (lock_mask && !(*lock_pressed & lock_pressed_mask)) {
+                    *flags ^= lock_mask;
+                    *lock_pressed |= lock_pressed_mask;
+                }
+                kb_buf[0] = (*flags & (SATURN_KB_CAPS | SATURN_KB_NUM | SATURN_KB_SCROLL)) | SATURN_KB_IDLE | SATURN_KB_MAKE;
+                break;
+            case KBMON_TYPE_BREAK:
+                if (lock_mask) {
+                    *lock_pressed &= ~lock_pressed_mask;
+                }
+                kb_buf[0] = (*flags & (SATURN_KB_CAPS | SATURN_KB_NUM | SATURN_KB_SCROLL)) | SATURN_KB_IDLE | SATURN_KB_BREAK;
+                break;
+        }
         kb_buf[1] = saturn_kb_scancode[id];
     }
     kbmon_set_code(dev_id, kb_buf, sizeof(kb_buf));
