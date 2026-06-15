@@ -43,6 +43,7 @@ enum {
     BT_SW,
     BT_SW2,
     BT_STEAM,
+    BT_PBP,
     BT_TYPE_MAX,
 };
 

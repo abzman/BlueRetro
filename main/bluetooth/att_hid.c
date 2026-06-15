@@ -17,6 +17,7 @@
 #include "adapter/mapping_quirks.h"
 #include "hidp/sw2.h"
 #include "hidp/steam.h"
+#include "hidp/pbp.h"
 
 enum {
     BT_ATT_HID_DEVICE_NAME = 0,
@@ -30,6 +31,12 @@ enum {
     BT_ATT_HID_REPORT_CFG,
     BT_ATT_HID_PPCP_CFG,
     BT_ATT_HID_BATT_LVL,
+
+    BT_ATT_PBP_FIND_SERVICE,
+    BT_ATT_PBP_FIND_CHRC,
+    BT_ATT_PBP_FIND_CCC,
+    BT_ATT_PBP_REPORT_CFG,
+
     BT_ATT_HID_INIT,
     BT_ATT_HID_STATE_MAX,
 };
@@ -50,6 +57,19 @@ struct bt_att_group_data_uuid16 {
     uint16_t start_handle;
     uint16_t end_handle;
     uint16_t uuid;
+} __packed;
+
+struct bt_att_group_data_uuid128 {
+    uint16_t start_handle;
+    uint16_t end_handle;
+    uint8_t uuid[16];
+} __packed;
+
+struct bt_att_read_type_data_uuid128 {
+    uint16_t handle;
+    uint8_t char_prop;
+    uint16_t char_value_handle;
+    uint8_t uuid[16];
 } __packed;
 
 struct bt_att_hid_report {
@@ -74,6 +94,24 @@ struct bt_att_hid {
     struct bt_att_hid_report reports[HID_MAX_REPORT];
 };
 
+static const uint8_t pbp_service_uuid[16] = {
+    0xE5, 0x23, 0x7A, 0xE2,
+    0x51, 0x6B,
+    0x55, 0xBB,
+    0x67, 0x45,
+    0x6D, 0xF3,
+    0x6C, 0xE1, 0x75, 0x66,
+};
+
+static const uint8_t pbp_input_uuid[16] = {
+    0xE6, 0x23, 0x7A, 0xE2,
+    0x51, 0x6B,
+    0x55, 0xBB,
+    0x67, 0x45,
+    0x6D, 0xF3,
+    0x6C, 0xE1, 0x75, 0x66,
+};
+
 typedef void (*bit_att_hid_start_func_t)(struct bt_dev *device,
     struct bt_att_hid *hid_data);
 typedef void (*bit_att_hid_process_func_t)(struct bt_dev *device,
@@ -88,6 +126,9 @@ static void bt_att_hid_start_device_name(struct bt_dev *device,
         struct bt_att_hid *hid_data) {
     bt_att_cmd_read_type_req_uuid16(device->acl_handle, 0x0001, 0xFFFF, BT_UUID_GAP_DEVICE_NAME);
 }
+
+static void bt_att_hid_start_pbp_find_service(struct bt_dev *device,
+    struct bt_att_hid *hid_data);
 
 static void bt_att_hid_process_device_name(struct bt_dev *device,
         struct bt_att_hid *hid_data, uint32_t att_len,
@@ -114,7 +155,14 @@ static void bt_att_hid_process_device_name(struct bt_dev *device,
 
     bt_hid_set_type_flags_from_name(device, hid_data->device_name);
     printf("dev: %ld type: %ld %s\n", device->ids.id, device->ids.type, hid_data->device_name);
+
     bt_mon_log(true, "dev: %ld type: %ld %s\n", device->ids.id, device->ids.type, hid_data->device_name);
+
+    if (device->ids.type == BT_PBP) {
+        device->hid_state = BT_ATT_PBP_FIND_SERVICE;
+        bt_att_hid_start_pbp_find_service(device, hid_data);
+        return;
+    }
 
     bt_att_hid_start_next_state(device, hid_data);
 }
@@ -445,6 +493,184 @@ static void bt_att_hid_start_init(struct bt_dev *device,
     }
 }
 
+static void bt_att_hid_pbp_fail(struct bt_dev *device, struct bt_att_hid *hid_data, const char *msg) {
+    printf("# PBP dev: %ld %s\n", device->ids.id, msg);
+    bt_mon_log(true, "# PBP dev: %ld %s\n", device->ids.id, msg);
+
+    /* Avoid leaving the device stuck in init-pending forever. */
+    device->hid_state = BT_ATT_HID_INIT;
+    bt_att_hid_start_init(device, hid_data);
+}
+
+static void bt_att_hid_start_pbp_find_service(struct bt_dev *device,
+    struct bt_att_hid *hid_data) {
+    hid_data->start_hdl = 0;
+    hid_data->end_hdl = 0;
+    hid_data->reports[0].report_hdl = 0;
+    hid_data->reports[0].cfg_hdl = 0;
+    hid_data->reports[0].char_prop = 0;
+
+    bt_att_cmd_read_group_req_uuid16(device->acl_handle, 0x0001, BT_UUID_GATT_PRIMARY);
+}
+
+static void bt_att_hid_process_pbp_find_service(struct bt_dev *device,
+    struct bt_att_hid *hid_data, uint32_t att_len, uint8_t *data, uint32_t data_len) {
+    if (data) {
+        const uint32_t elem_cnt = (att_len - 2) / data_len;
+        uint16_t last_end_handle = 0;
+
+        if (data_len == sizeof(struct bt_att_group_data_uuid128)) {
+            struct bt_att_group_data_uuid128 *elem = (struct bt_att_group_data_uuid128 *)data;
+
+            for (uint32_t i = 0; i < elem_cnt; i++) {
+                last_end_handle = elem[i].end_handle;
+
+                if (!memcmp(elem[i].uuid, pbp_service_uuid, sizeof(pbp_service_uuid))) {
+                    hid_data->start_hdl = elem[i].start_handle;
+                    hid_data->end_hdl = elem[i].end_handle;
+
+                    printf("PBP service: %04X-%04X\n", hid_data->start_hdl, hid_data->end_hdl);
+                    bt_mon_log(true, "PBP service: %04X-%04X\n", hid_data->start_hdl, hid_data->end_hdl);
+
+                    bt_att_hid_start_next_state(device, hid_data);
+                    return;
+                }
+            }
+        }
+        else {
+            struct bt_att_group_data *last_elem =
+                (struct bt_att_group_data *)((uint8_t *)data + data_len * (elem_cnt - 1));
+            last_end_handle = last_elem->end_handle;
+        }
+
+        if (last_end_handle && last_end_handle < 0xFFFF) {
+            bt_att_cmd_read_group_req_uuid16(device->acl_handle,
+                last_end_handle + 1, BT_UUID_GATT_PRIMARY);
+            return;
+        }
+    }
+
+    bt_att_hid_pbp_fail(device, hid_data, "custom service not found");
+}
+
+static void bt_att_hid_start_pbp_find_chrc(struct bt_dev *device,
+    struct bt_att_hid *hid_data) {
+    bt_att_cmd_read_type_req_uuid16(device->acl_handle,
+        hid_data->start_hdl, hid_data->end_hdl, BT_UUID_GATT_CHRC);
+}
+
+static void bt_att_hid_process_pbp_find_chrc(struct bt_dev *device,
+    struct bt_att_hid *hid_data, uint32_t att_len, uint8_t *data, uint32_t data_len) {
+    if (data) {
+        const uint32_t elem_cnt = (att_len - 2) / data_len;
+        uint16_t last_handle = 0;
+
+        if (data_len == sizeof(struct bt_att_read_type_data_uuid128)) {
+            struct bt_att_read_type_data_uuid128 *elem =
+                (struct bt_att_read_type_data_uuid128 *)data;
+
+            for (uint32_t i = 0; i < elem_cnt; i++) {
+                last_handle = elem[i].handle;
+
+                if (!memcmp(elem[i].uuid, pbp_input_uuid, sizeof(pbp_input_uuid))) {
+                    hid_data->reports[0].report_hdl = elem[i].char_value_handle;
+                    hid_data->reports[0].char_prop = elem[i].char_prop;
+
+                    printf("PBP input char: decl=%04X value=%04X prop=%02X\n",
+                        elem[i].handle,
+                        elem[i].char_value_handle,
+                        elem[i].char_prop);
+                    bt_mon_log(true, "PBP input char: decl=%04X value=%04X prop=%02X\n",
+                        elem[i].handle,
+                        elem[i].char_value_handle,
+                        elem[i].char_prop);
+
+                    bt_att_hid_start_next_state(device, hid_data);
+                    return;
+                }
+            }
+        }
+        else {
+            struct bt_att_read_type_data *elem = (struct bt_att_read_type_data *)data;
+            last_handle = elem[elem_cnt - 1].handle;
+        }
+
+        if (last_handle && last_handle < hid_data->end_hdl) {
+            bt_att_cmd_read_type_req_uuid16(device->acl_handle,
+                last_handle + 1, hid_data->end_hdl, BT_UUID_GATT_CHRC);
+            return;
+        }
+    }
+
+    bt_att_hid_pbp_fail(device, hid_data, "input characteristic not found");
+}
+
+static void bt_att_hid_start_pbp_find_ccc(struct bt_dev *device,
+    struct bt_att_hid *hid_data) {
+    if (!hid_data->reports[0].report_hdl) {
+        bt_att_hid_pbp_fail(device, hid_data, "input handle missing before CCC search");
+        return;
+    }
+
+    bt_att_cmd_find_info_req(device->acl_handle,
+        hid_data->reports[0].report_hdl + 1, hid_data->end_hdl);
+}
+
+static void bt_att_hid_process_pbp_find_ccc(struct bt_dev *device,
+    struct bt_att_hid *hid_data, uint32_t att_len, uint8_t *info, uint32_t format) {
+    if (info) {
+        uint16_t last_handle = 0;
+
+        if (format == BT_ATT_INFO_16) {
+            struct bt_att_info_16 *info16 = (struct bt_att_info_16 *)info;
+            const uint32_t elem_cnt = (att_len - 2) / sizeof(*info16);
+
+            for (uint32_t i = 0; i < elem_cnt; i++) {
+                last_handle = info16[i].handle;
+
+                if (info16[i].uuid == BT_UUID_GATT_CCC) {
+                    hid_data->reports[0].cfg_hdl = info16[i].handle;
+
+                    printf("PBP CCC: %04X\n", hid_data->reports[0].cfg_hdl);
+                    bt_mon_log(true, "PBP CCC: %04X\n", hid_data->reports[0].cfg_hdl);
+
+                    bt_att_hid_start_next_state(device, hid_data);
+                    return;
+                }
+            }
+        }
+        else {
+            struct bt_att_info_128 *info128 = (struct bt_att_info_128 *)info;
+            const uint32_t elem_cnt = (att_len - 2) / sizeof(*info128);
+            last_handle = info128[elem_cnt - 1].handle;
+        }
+
+        if (last_handle && last_handle < hid_data->end_hdl) {
+            bt_att_cmd_find_info_req(device->acl_handle,
+                last_handle + 1, hid_data->end_hdl);
+            return;
+        }
+    }
+
+    bt_att_hid_pbp_fail(device, hid_data, "CCC descriptor not found");
+}
+
+static void bt_att_hid_start_pbp_report_cfg(struct bt_dev *device,
+    struct bt_att_hid *hid_data) {
+    if (!hid_data->reports[0].cfg_hdl) {
+        bt_att_hid_pbp_fail(device, hid_data, "cannot enable notify; CCC handle missing");
+        return;
+    }
+
+    uint16_t data = BT_GATT_CCC_NOTIFY;
+
+    printf("PBP enable notify on CCC: %04X\n", hid_data->reports[0].cfg_hdl);
+    bt_mon_log(true, "PBP enable notify on CCC: %04X\n", hid_data->reports[0].cfg_hdl);
+
+    bt_att_cmd_write_req(device->acl_handle,
+        hid_data->reports[0].cfg_hdl, (uint8_t *)&data, sizeof(data));
+}
+
 static bit_att_hid_start_func_t start_state_func[BT_ATT_HID_STATE_MAX] = {
     bt_att_hid_start_device_name,
     bt_att_hid_start_appearance,
@@ -457,8 +683,15 @@ static bit_att_hid_start_func_t start_state_func[BT_ATT_HID_STATE_MAX] = {
     bt_att_hid_start_report_cfg,
     bt_att_hid_start_ppcp_cfg,
     bt_att_hid_start_batt_lvl,
+
+    bt_att_hid_start_pbp_find_service,
+    bt_att_hid_start_pbp_find_chrc,
+    bt_att_hid_start_pbp_find_ccc,
+    bt_att_hid_start_pbp_report_cfg,
+
     bt_att_hid_start_init, /* Need to be last one */
 };
+
 static bit_att_hid_process_func_t process_state_func[BT_ATT_HID_STATE_MAX] = {
     bt_att_hid_process_device_name,
     bt_att_hid_process_appearance,
@@ -471,6 +704,12 @@ static bit_att_hid_process_func_t process_state_func[BT_ATT_HID_STATE_MAX] = {
     bt_att_hid_continue_report_cfg,
     bt_att_hid_process_ppcp_cfg,
     bt_att_hid_process_batt_lvl,
+
+    bt_att_hid_process_pbp_find_service,
+    bt_att_hid_process_pbp_find_chrc,
+    bt_att_hid_process_pbp_find_ccc,
+    NULL,
+
     NULL, /* Need to be last one */
 };
 
@@ -582,6 +821,9 @@ void bt_att_hid_hdlr(struct bt_dev *device, struct bt_hci_pkt *bt_hci_acl_pkt, u
                     case BT_ATT_HID_IDENT_HID_HLDS:
                         bt_att_hid_process_ident_hid_hdls(device, hid_data, att_len, find_info_rsp->info, find_info_rsp->format);
                         break;
+                    case BT_ATT_PBP_FIND_CCC:
+                        bt_att_hid_process_pbp_find_ccc(device, hid_data, att_len, find_info_rsp->info, find_info_rsp->format);
+                        break;
                     default:
                         printf("# %s: Invalid state: %ld rsp: 0x%02X\n", __FUNCTION__, device->hid_state, bt_hci_acl_pkt->att_hdr.code);
                         break;
@@ -619,6 +861,9 @@ void bt_att_hid_hdlr(struct bt_dev *device, struct bt_hci_pkt *bt_hci_acl_pkt, u
                         break;
                     case BT_ATT_HID_BATT_LVL:
                         bt_att_hid_process_batt_lvl(device, hid_data, att_len, read_type_rsp->data[0].value, rsp_len);
+                        break;
+                    case BT_ATT_PBP_FIND_CHRC:
+                        bt_att_hid_process_pbp_find_chrc(device, hid_data, att_len, (uint8_t *)read_type_rsp->data, read_type_rsp->len);
                         break;
                     default:
                         printf("# %s: Invalid state: %ld rsp: 0x%02X\n", __FUNCTION__, device->hid_state, bt_hci_acl_pkt->att_hdr.code);
@@ -677,6 +922,9 @@ void bt_att_hid_hdlr(struct bt_dev *device, struct bt_hci_pkt *bt_hci_acl_pkt, u
                     case BT_ATT_HID_FIND_HID_HDLS:
                         bt_att_hid_process_find_hid_hdls(device, hid_data, att_len, (uint8_t *)read_group_rsp->data, read_group_rsp->len);
                         break;
+                    case BT_ATT_PBP_FIND_SERVICE:
+                        bt_att_hid_process_pbp_find_service(device, hid_data, att_len, (uint8_t *)read_group_rsp->data, read_group_rsp->len);
+                        break;
                     default:
                         printf("# %s: Invalid state: %ld rsp: 0x%02X\n", __FUNCTION__, device->hid_state, bt_hci_acl_pkt->att_hdr.code);
                         break;
@@ -690,6 +938,9 @@ void bt_att_hid_hdlr(struct bt_dev *device, struct bt_hci_pkt *bt_hci_acl_pkt, u
                 switch (device->hid_state) {
                     case BT_ATT_HID_REPORT_CFG:
                         bt_att_hid_continue_report_cfg(device, hid_data, att_len, NULL, 0);
+                        break;
+                    case BT_ATT_PBP_REPORT_CFG:
+                        bt_att_hid_start_next_state(device, hid_data);
                         break;
                     default:
                         printf("# %s: Invalid state: %ld rsp: 0x%02X\n", __FUNCTION__, device->hid_state, bt_hci_acl_pkt->att_hdr.code);
@@ -705,6 +956,9 @@ void bt_att_hid_hdlr(struct bt_dev *device, struct bt_hci_pkt *bt_hci_acl_pkt, u
             switch (device->ids.type) {
                 case BT_SW2:
                     bt_hid_sw2_hdlr(device, notify->handle, notify->value, att_len - sizeof(notify->handle));
+                    break;
+                case BT_PBP:
+                    bt_hid_pbp_hdlr(device, notify->handle, notify->value, att_len - sizeof(notify->handle));
                     break;
                 default:
                     for (uint32_t i = 0; i < HID_MAX_REPORT; i++) {
