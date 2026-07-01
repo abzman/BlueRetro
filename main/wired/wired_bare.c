@@ -18,6 +18,7 @@
 #include "snes_spi.h"
 #include "jag_io.h"
 #include "wii_i2c.h"
+#include "soc/pcnt_struct.h"
 #include "adapter/adapter.h"
 #include "wired_bare.h"
 
@@ -170,4 +171,29 @@ void spi_init(struct spi_cfg *cfg) {
     cfg->hw->slave.trans_inten = cfg->inten;
     cfg->hw->slave.trans_done = 0;
     cfg->hw->cmd.usr = 1;
+}
+
+void pcnt_init(uint8_t id) {
+    if (id > 1) {
+        return;
+    }
+
+    PCNT.conf_unit[id].conf0.ch0_pos_mode = 1;
+    PCNT.conf_unit[id].conf0.ch0_neg_mode = 0;
+    PCNT.conf_unit[id].conf0.ch0_hctrl_mode = 1;
+    PCNT.conf_unit[id].conf0.ch0_lctrl_mode = 0;
+    PCNT.conf_unit[id].conf0.filter_en = 0;
+    PCNT.conf_unit[id].conf2.cnt_h_lim = 32767;
+    PCNT.conf_unit[id].conf2.cnt_l_lim = 0;
+
+    if (id) {
+        PCNT.ctrl.cnt_rst_u1 = 1;
+        PCNT.ctrl.cnt_rst_u1 = 0;
+        PCNT.ctrl.cnt_pause_u1 = 0;
+    }
+    else {
+        PCNT.ctrl.cnt_rst_u0 = 1;
+        PCNT.ctrl.cnt_rst_u0 = 0;
+        PCNT.ctrl.cnt_pause_u0 = 0;
+    }
 }

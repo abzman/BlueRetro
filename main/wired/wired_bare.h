@@ -75,5 +75,6 @@ void wired_bare_init(uint32_t package);
 void wired_bare_port_cfg(uint16_t mask);
 const char *wired_get_sys_name(void);
 void spi_init(struct spi_cfg *cfg);
+void pcnt_init(uint8_t id);
 
 #endif /* _WIRED_BARE_H_ */
