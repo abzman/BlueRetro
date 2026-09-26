@@ -221,6 +221,47 @@ static void bt_hci_q_conf(uint32_t next) {
     }
 }
 
+/* An LE connect the peer never answers: it stopped advertising after the connect went out,
+ * and the controller then waits for it for ever, scanning for nothing else. After this long
+ * the connect is cancelled, which the controller reports as a failed connection, and the
+ * usual path frees the slot and scans again. A controller in pairing mode advertises many
+ * times a second, so three seconds of silence means it is gone. */
+#define BT_HCI_LE_CONN_TIMEOUT_US (3 * 1000000)
+
+static esp_timer_handle_t le_conn_timer = NULL;
+
+static void bt_hci_le_conn_timeout(void *arg) {
+    /* Sent from the timer's task, so in a packet of its own, not the host task's scratch one. */
+    struct {
+        struct bt_hci_h4_hdr h4_hdr;
+        struct bt_hci_cmd_hdr cmd_hdr;
+    } __packed cancel = {
+        .h4_hdr.type = BT_HCI_H4_TYPE_CMD,
+        .cmd_hdr.opcode = BT_HCI_OP_LE_CREATE_CONN_CANCEL,
+        .cmd_hdr.param_len = 0,
+    };
+    printf("# %s: no answer to the LE connect, cancelling it\n", __FUNCTION__);
+    bt_host_txq_add((uint8_t *)&cancel, sizeof(cancel));
+}
+
+static void bt_hci_le_conn_timer_start(void) {
+    if (le_conn_timer == NULL) {
+        const esp_timer_create_args_t args = {
+            .callback = bt_hci_le_conn_timeout,
+            .name = "le_conn",
+        };
+        esp_timer_create(&args, &le_conn_timer);
+    }
+    esp_timer_stop(le_conn_timer);
+    esp_timer_start_once(le_conn_timer, BT_HCI_LE_CONN_TIMEOUT_US);
+}
+
+static void bt_hci_le_conn_timer_stop(void) {
+    if (le_conn_timer) {
+        esp_timer_stop(le_conn_timer);
+    }
+}
+
 static void bt_hci_cmd(uint16_t opcode, uint32_t cp_len) {
     uint32_t packet_len = BT_HCI_H4_HDR_SIZE + BT_HCI_CMD_HDR_SIZE + cp_len;
 
@@ -936,6 +977,7 @@ static void bt_hci_cmd_le_create_conn(void *bdaddr_le) {
     le_create_conn->max_ce_len = 0;
 
     bt_hci_cmd(BT_HCI_OP_LE_CREATE_CONN, sizeof(*le_create_conn));
+    bt_hci_le_conn_timer_start();
 }
 
 static void bt_hci_cmd_le_read_wl_size(void *cp) {
@@ -1046,7 +1088,8 @@ static void bt_hci_le_meta_evt_hdlr(struct bt_hci_pkt *bt_hci_evt_pkt) {
         {
             struct bt_hci_evt_le_conn_complete *le_conn_complete =
                 (struct bt_hci_evt_le_conn_complete *)(bt_hci_evt_pkt->evt_data + sizeof(struct bt_hci_evt_le_meta_event));
-            printf("# BT_HCI_EVT_LE_CONN_COMPLETE\n");
+            printf("# BT_HCI_EVT_LE_CONN_COMPLETE status: 0x%02X\n", le_conn_complete->status);
+            bt_hci_le_conn_timer_stop();
             bt_host_get_dev_from_bdaddr(le_conn_complete->peer_addr.a.val, &device);
             if (device) {
                 if (le_conn_complete->status) {
