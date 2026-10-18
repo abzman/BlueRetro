@@ -236,6 +236,14 @@ void bt_l2cap_sig_hdlr(struct bt_dev *device, struct bt_hci_pkt *bt_hci_acl_pkt)
                     bt_l2cap_cmd_conf_req(device->acl_handle, get_tx_ident(), device->intr_chan.dcid);
                 }
             }
+            /* Some clones (ex: QRD PS4-mode pads) refuse HID until the link is encrypted */
+            else if (conn_rsp->result == BT_L2CAP_BR_ERR_SEC_BLOCK && conn_rsp->scid == device->ctrl_chan.scid
+                    && !atomic_test_bit(&device->flags, BT_DEV_ENCRYPTION)) {
+                printf("# dev: %ld HID ctrl security block, retry with encryption\n", device->ids.id);
+                atomic_set_bit(&device->flags, BT_DEV_ENCRYPTION);
+                atomic_set_bit(&device->flags, BT_DEV_HID_CTRL_SEC_RETRY);
+                bt_hci_set_conn_encrypt(device);
+            }
             break;
         }
         case BT_L2CAP_CONF_REQ:

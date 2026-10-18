@@ -1507,6 +1507,10 @@ void bt_hci_write_link_supervision_timeout(struct bt_dev *device) {
     bt_hci_cmd_write_link_supervision_to((void *)&device->acl_handle);
 }
 
+void bt_hci_set_conn_encrypt(struct bt_dev *device) {
+    bt_hci_cmd_set_conn_encrypt((void *)&device->acl_handle);
+}
+
 void bt_hci_get_le_local_addr(bt_addr_le_t *le_local) {
     memcpy(le_local->a.val, local_bdaddr, sizeof(le_local->a.val));
     le_local->type = 0x00;
@@ -1800,6 +1804,9 @@ void bt_hci_evt_hdlr(struct bt_hci_pkt *bt_hci_evt_pkt) {
                 }
                 else if (atomic_test_bit(&device->flags, BT_DEV_IS_BLE)) {
                     bt_att_hid_init(device);
+                }
+                else if (atomic_test_and_clear_bit(&device->flags, BT_DEV_HID_CTRL_SEC_RETRY)) {
+                    bt_l2cap_cmd_hid_ctrl_conn_req(device);
                 }
             }
             else {

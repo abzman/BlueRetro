@@ -42,6 +42,7 @@ enum {
      * device asked for its own, or we have already tightened the
      * supervision timeout after init. Either way, leave it alone. */
     BT_DEV_LE_PARAM_SET,
+    BT_DEV_HID_CTRL_SEC_RETRY,
 };
 
 /* Supervision timeout for an established LE link, in 10 ms units.
