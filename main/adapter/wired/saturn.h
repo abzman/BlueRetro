@@ -10,7 +10,12 @@
 void saturn_meta_init(struct wired_ctrl *ctrl_data);
 void saturn_init_buffer(int32_t dev_mode, struct wired_data *wired_data);
 void saturn_from_generic(int32_t dev_mode, struct wired_ctrl *ctrl_data, struct wired_data *wired_data);
+void saturn_kb_from_generic(struct wired_ctrl *ctrl_data, struct wired_data *wired_data);
 void saturn_kb_id_to_scancode(uint32_t dev_id, uint8_t type, uint8_t id);
 void saturn_gen_turbo_mask(struct wired_data *wired_data);
+
+extern const uint32_t saturn_kb_mask[4];
+extern const uint32_t saturn_kb_desc[4];
+extern const uint8_t saturn_kb_scancode[KBM_MAX];
 
 #endif /* _SATURN_H_ */

@@ -45,6 +45,12 @@ static DRAM_ATTR const uint8_t saturn_axes_idx[ADAPTER_MAX_AXES] =
     0,       1,       0,       0,       3,      2
 };
 
+static DRAM_ATTR const uint8_t saturn_mission_axes_idx[ADAPTER_MAX_AXES] =
+{
+/*  AXIS_LX, AXIS_LY, AXIS_RX, AXIS_RY, TRIG_L, TRIG_R  */
+    0,       1,       0,       2,       3,      0
+};
+
 static DRAM_ATTR const uint8_t sega_mouse_axes_idx[ADAPTER_MAX_AXES] =
 {
 /*  AXIS_LX, AXIS_LY, AXIS_RX, AXIS_RY, TRIG_L, TRIG_R  */
@@ -57,6 +63,26 @@ static DRAM_ATTR const struct ctrl_meta saturn_axes_meta[ADAPTER_MAX_AXES] =
     {.size_min = -128, .size_max = 127, .neutral = 0x80, .abs_max = 0x7F, .abs_min = 0x80, .polarity = 1},
     {.size_min = -128, .size_max = 127, .neutral = 0x80, .abs_max = 0x7F, .abs_min = 0x80}, //NA
     {.size_min = -128, .size_max = 127, .neutral = 0x80, .abs_max = 0x7F, .abs_min = 0x80, .polarity = 1}, //NA
+    {.size_min = 0, .size_max = 255, .neutral = 0x00, .abs_max = 0xFF, .abs_min = 0x00},
+    {.size_min = 0, .size_max = 255, .neutral = 0x00, .abs_max = 0xFF, .abs_min = 0x00},
+};
+
+static DRAM_ATTR const struct ctrl_meta saturn_racing_axes_meta[ADAPTER_MAX_AXES] =
+{
+    {.size_min = -127, .size_max = 128, .neutral = 0x7F, .abs_max = 0x80, .abs_min = 0x7F},
+    {.size_min = -128, .size_max = 127, .neutral = 0x80, .abs_max = 0x7F, .abs_min = 0x80, .polarity = 1},
+    {.size_min = -128, .size_max = 127, .neutral = 0x80, .abs_max = 0x7F, .abs_min = 0x80}, //NA
+    {.size_min = -128, .size_max = 127, .neutral = 0x80, .abs_max = 0x7F, .abs_min = 0x80, .polarity = 1}, //NA
+    {.size_min = 0, .size_max = 255, .neutral = 0x00, .abs_max = 0xFF, .abs_min = 0x00},
+    {.size_min = 0, .size_max = 255, .neutral = 0x00, .abs_max = 0xFF, .abs_min = 0x00},
+};
+
+static DRAM_ATTR const struct ctrl_meta saturn_mission_axes_meta[ADAPTER_MAX_AXES] =
+{
+    {.size_min = -128, .size_max = 127, .neutral = 0x80, .abs_max = 0x7F, .abs_min = 0x80},
+    {.size_min = -128, .size_max = 127, .neutral = 0x80, .abs_max = 0x7F, .abs_min = 0x80, .polarity = 1},
+    {.size_min = -128, .size_max = 127, .neutral = 0x80, .abs_max = 0x7F, .abs_min = 0x80}, //NA
+    {.size_min = -128, .size_max = 127, .neutral = 0x80, .abs_max = 0x7F, .abs_min = 0x80},
     {.size_min = 0, .size_max = 255, .neutral = 0x00, .abs_max = 0xFF, .abs_min = 0x00},
     {.size_min = 0, .size_max = 255, .neutral = 0x00, .abs_max = 0xFF, .abs_min = 0x00},
 };
@@ -100,6 +126,8 @@ static const uint32_t saturn_mask[4] = {0x335F0F00, 0x00000000, 0x00000000, BR_C
 static const uint32_t saturn_desc[4] = {0x00000000, 0x00000000, 0x00000000, 0x00000000};
 static const uint32_t saturn_3d_mask[4] = {0x335F0F0F, 0x00000000, 0x00000000, BR_COMBO_MASK};
 static const uint32_t saturn_3d_desc[4] = {0x1100000F, 0x00000000, 0x00000000, 0x00000000};
+static const uint32_t saturn_mission_mask[4] = {0x335F0FCF, 0x00000000, 0x00000000, BR_COMBO_MASK};
+static const uint32_t saturn_mission_desc[4] = {0x000000CF, 0x00000000, 0x00000000, 0x00000000};
 static DRAM_ATTR const uint32_t saturn_btns_mask[32] = {
     0, 0, 0, 0,
     0, 0, 0, 0,
@@ -124,8 +152,8 @@ static const uint32_t sega_mouse_btns_mask[32] = {
     BIT(SATURN_B), 0, 0, 0,
 };
 
-static const uint32_t saturn_kb_mask[4] = {0xE6FF0F0F, 0xFFFFFFFF, 0xFFFFFFFF, 0x0007FFFF | BR_COMBO_MASK};
-static const uint32_t saturn_kb_desc[4] = {0x00000000, 0x00000000, 0x00000000, 0x00000000};
+const uint32_t saturn_kb_mask[4] = {0xE6FF0F0F, 0xFFFFFFFF, 0xFFFFFFFF, 0x0007FFFF | BR_COMBO_MASK};
+const uint32_t saturn_kb_desc[4] = {0x00000000, 0x00000000, 0x00000000, 0x00000000};
 static DRAM_ATTR const uint16_t saturn_kb_btns_mask[KBM_MAX] = {
     [KB_RIGHT] = BIT(SATURN_LD_RIGHT),
     [KB_LEFT] = BIT(SATURN_LD_LEFT),
@@ -141,7 +169,7 @@ static DRAM_ATTR const uint16_t saturn_kb_btns_mask[KBM_MAX] = {
     [KB_Q] = BIT(SATURN_L),
     [KB_E] = BIT(SATURN_R),
 };
-static const uint8_t saturn_kb_scancode[KBM_MAX] = {
+const uint8_t saturn_kb_scancode[KBM_MAX] = {
  /* Source: https://plutiedev.com/saturn-keyboard */
  /* KB_A, KB_D, KB_S, KB_W, MOUSE_X_LEFT, MOUSE_X_RIGHT, MOUSE_Y_DOWN MOUSE_Y_UP */
     0x1C, 0x23, 0x1B, 0x1D, 0x00, 0x00, 0x00, 0x00,
@@ -162,7 +190,7 @@ static const uint8_t saturn_kb_scancode[KBM_MAX] = {
     0x46, 0x45, 0x66, 0x0D, 0x4E, 0x55, 0x54, 0x5B,
 
  /* KB_BACKSLASH, KB_SEMICOLON, KB_APOSTROPHE, KB_GRAVE, KB_COMMA, KB_DOT, KB_SLASH, KB_CAPSLOCK */
-    0x5D, 0x4C, 0x51, 0x00, 0x41, 0x49, 0x4A, 0x58,
+    0x5D, 0x4C, 0x52, 0x0E, 0x41, 0x49, 0x4A, 0x58,
  /* KB_F1, KB_F2, KB_F3, KB_F4, KB_F5, KB_F6, KB_F7, KB_F8 */
     0x05, 0x06, 0x04, 0x0C, 0x03, 0x0B, 0x83, 0x0A,
  /* KB_F9, KB_F10, KB_F11, KB_F12, KB_PSCREEN, KB_SCROLL, KB_PAUSE, KB_INSERT */
@@ -177,6 +205,64 @@ static const uint8_t saturn_kb_scancode[KBM_MAX] = {
  /* KB_RSHIFT, KB_RALT, KB_RWIN */
     0x59, 0x17, 0x00,
 };
+
+static const struct ctrl_meta * IRAM_ATTR saturn_get_axes_meta(uint32_t index) {
+    if (config.out_cfg[index].dev_mode == DEV_PAD_ALT) {
+        switch (config.out_cfg[index].acc_mode) {
+            case ACC_MEM:
+                return saturn_mission_axes_meta;
+            case ACC_RUMBLE:
+                return saturn_racing_axes_meta;
+        }
+    }
+    return saturn_axes_meta;
+}
+
+static const uint8_t * IRAM_ATTR saturn_get_axes_idx(uint32_t index) {
+    return (config.out_cfg[index].dev_mode == DEV_PAD_ALT && config.out_cfg[index].acc_mode == ACC_MEM) ?
+        saturn_mission_axes_idx : saturn_axes_idx;
+}
+
+static uint8_t IRAM_ATTR saturn_axis_supported(uint32_t index, uint32_t axis) {
+    if (axis == AXIS_RX) {
+        return 0;
+    }
+    if (axis == AXIS_RY) {
+        return (config.out_cfg[index].dev_mode == DEV_PAD_ALT && config.out_cfg[index].acc_mode == ACC_MEM);
+    }
+    return 1;
+}
+
+static const uint32_t *saturn_get_mask(uint32_t index) {
+    return (config.out_cfg[index].dev_mode == DEV_PAD_ALT && config.out_cfg[index].acc_mode == ACC_MEM) ?
+        saturn_mission_mask : saturn_3d_mask;
+}
+
+static const uint32_t *saturn_get_desc(uint32_t index) {
+    return (config.out_cfg[index].dev_mode == DEV_PAD_ALT && config.out_cfg[index].acc_mode == ACC_MEM) ?
+        saturn_mission_desc : saturn_3d_desc;
+}
+
+static void saturn_set_digital_axis_bit(uint16_t *buttons, uint32_t bit, uint8_t value, uint8_t on_threshold, uint8_t off_threshold, uint8_t high_active) {
+    if ((high_active && value >= on_threshold) || (!high_active && value <= on_threshold)) {
+        *buttons &= ~BIT(bit);
+    }
+    else if ((high_active && value <= off_threshold) || (!high_active && value >= off_threshold)) {
+        *buttons |= BIT(bit);
+    }
+}
+
+static void saturn_mission_apply_digital_thresholds(struct saturn_map *map) {
+    saturn_set_digital_axis_bit(&map->buttons, SATURN_LD_RIGHT, map->axes[saturn_mission_axes_idx[AXIS_LX]], 170, 149, 1);
+    saturn_set_digital_axis_bit(&map->buttons, SATURN_LD_LEFT, map->axes[saturn_mission_axes_idx[AXIS_LX]], 86, 107, 0);
+    saturn_set_digital_axis_bit(&map->buttons, SATURN_LD_DOWN, map->axes[saturn_mission_axes_idx[AXIS_LY]], 170, 149, 1);
+    saturn_set_digital_axis_bit(&map->buttons, SATURN_LD_UP, map->axes[saturn_mission_axes_idx[AXIS_LY]], 86, 107, 0);
+}
+
+static void saturn_racing_apply_digital_thresholds(struct saturn_map *map) {
+    saturn_set_digital_axis_bit(&map->buttons, SATURN_LD_RIGHT, map->axes[saturn_axes_idx[AXIS_LX]], 0x97, 0x8F, 1);
+    saturn_set_digital_axis_bit(&map->buttons, SATURN_LD_LEFT, map->axes[saturn_axes_idx[AXIS_LX]], 0x67, 0x6F, 0);
+}
 
 static void saturn_ctrl_special_action(struct wired_ctrl *ctrl_data, struct wired_data *wired_data) {
     /* Output config mode toggle GamePad/GamePadAlt */
@@ -224,13 +310,15 @@ void IRAM_ATTR saturn_init_buffer(int32_t dev_mode, struct wired_data *wired_dat
         {
             struct saturn_map *map = (struct saturn_map *)wired_data->output;
             struct saturn_map *map_mask = (struct saturn_map *)wired_data->output_mask;
+            const struct ctrl_meta *axes_meta = saturn_get_axes_meta(wired_data->index);
+            const uint8_t *axes_idx = saturn_get_axes_idx(wired_data->index);
 
             map->buttons = 0xFFFF;
             for (uint32_t i = 0; i < ADAPTER_MAX_AXES; i++) {
-                if (i == 2 || i == 3) {
+                if (!saturn_axis_supported(wired_data->index, i)) {
                     continue;
                 }
-                map->axes[saturn_axes_idx[i]] = saturn_axes_meta[i].neutral;
+                map->axes[axes_idx[i]] = axes_meta[i].neutral;
             }
 
             map_mask->buttons = 0x0000;
@@ -257,9 +345,9 @@ void saturn_meta_init(struct wired_ctrl *ctrl_data) {
                     ctrl_data[i].axes[j].meta = &sega_mouse_axes_meta[j];
                     break;
                 case DEV_PAD_ALT:
-                    ctrl_data[i].mask = saturn_3d_mask;
-                    ctrl_data[i].desc = saturn_3d_desc;
-                    ctrl_data[i].axes[j].meta = &saturn_axes_meta[j];
+                    ctrl_data[i].mask = saturn_get_mask(i);
+                    ctrl_data[i].desc = saturn_get_desc(i);
+                    ctrl_data[i].axes[j].meta = &saturn_get_axes_meta(i)[j];
                     break;
                 default:
                     ctrl_data[i].mask = saturn_mask;
@@ -294,35 +382,46 @@ void saturn_ctrl_from_generic(struct wired_ctrl *ctrl_data, struct wired_data *w
     saturn_ctrl_special_action(ctrl_data, wired_data);
 
     if (config.out_cfg[ctrl_data->index].dev_mode == DEV_PAD_ALT) {
+        const uint8_t *axes_idx = saturn_get_axes_idx(ctrl_data->index);
+        const uint32_t *desc = saturn_get_desc(ctrl_data->index);
+
         for (uint32_t i = 0; i < ADAPTER_MAX_AXES; i++) {
-            if (i == 2 || i == 3) {
+            if (!saturn_axis_supported(ctrl_data->index, i)) {
                 continue;
             }
-            if (ctrl_data->map_mask[0] & (axis_to_btn_mask(i) & saturn_3d_desc[0])) {
+            if (ctrl_data->map_mask[0] & (axis_to_btn_mask(i) & desc[0])) {
                 if (ctrl_data->axes[i].value > ctrl_data->axes[i].meta->size_max) {
-                    map_tmp.axes[saturn_axes_idx[i]] = 255;
+                    map_tmp.axes[axes_idx[i]] = 255;
                 }
                 else if (ctrl_data->axes[i].value < ctrl_data->axes[i].meta->size_min) {
-                    map_tmp.axes[saturn_axes_idx[i]] = 0;
+                    map_tmp.axes[axes_idx[i]] = 0;
                 }
                 else {
-                    map_tmp.axes[saturn_axes_idx[i]] = (uint8_t)(ctrl_data->axes[i].value + ctrl_data->axes[i].meta->neutral);
+                    map_tmp.axes[axes_idx[i]] = (uint8_t)(ctrl_data->axes[i].value + ctrl_data->axes[i].meta->neutral);
                 }
             }
             wired_data->cnt_mask[axis_to_btn_id(i)] = ctrl_data->axes[i].cnt_mask;
         }
 
-        if (map_tmp.axes[saturn_axes_idx[TRIG_L]] < 0x56) {
-            map_tmp.buttons |= BIT(SATURN_L);
+        if (config.out_cfg[ctrl_data->index].acc_mode == ACC_MEM) {
+            saturn_mission_apply_digital_thresholds(&map_tmp);
         }
-        else if (map_tmp.axes[saturn_axes_idx[TRIG_L]] > 0x8D) {
-            map_tmp.buttons &= ~BIT(SATURN_L);
+        else if (config.out_cfg[ctrl_data->index].acc_mode == ACC_RUMBLE) {
+            saturn_racing_apply_digital_thresholds(&map_tmp);
         }
-        if (map_tmp.axes[saturn_axes_idx[TRIG_R]] < 0x56) {
-            map_tmp.buttons |= BIT(SATURN_R);
-        }
-        else if (map_tmp.axes[saturn_axes_idx[TRIG_R]] > 0x8D) {
-            map_tmp.buttons &= ~BIT(SATURN_R);
+        else {
+            if (map_tmp.axes[saturn_axes_idx[TRIG_L]] < 0x56) {
+                map_tmp.buttons |= BIT(SATURN_L);
+            }
+            else if (map_tmp.axes[saturn_axes_idx[TRIG_L]] > 0x8D) {
+                map_tmp.buttons &= ~BIT(SATURN_L);
+            }
+            if (map_tmp.axes[saturn_axes_idx[TRIG_R]] < 0x56) {
+                map_tmp.buttons |= BIT(SATURN_R);
+            }
+            else if (map_tmp.axes[saturn_axes_idx[TRIG_R]] > 0x8D) {
+                map_tmp.buttons &= ~BIT(SATURN_R);
+            }
         }
     }
 
@@ -369,7 +468,7 @@ static void saturn_mouse_from_generic(struct wired_ctrl *ctrl_data, struct wired
     memcpy(wired_data->output, (void *)&map_tmp, sizeof(map_tmp) - 8);
 }
 
-static void saturn_kb_from_generic(struct wired_ctrl *ctrl_data, struct wired_data *wired_data) {
+void saturn_kb_from_generic(struct wired_ctrl *ctrl_data, struct wired_data *wired_data) {
     uint16_t buttons = *(uint16_t *)wired_data->output;
 
     if (!atomic_test_bit(&wired_data->flags, WIRED_KBMON_INIT)) {
@@ -457,6 +556,8 @@ void saturn_from_generic(int32_t dev_mode, struct wired_ctrl *ctrl_data, struct 
 
 void IRAM_ATTR saturn_gen_turbo_mask(struct wired_data *wired_data) {
     struct saturn_map *map_mask = (struct saturn_map *)wired_data->output_mask;
+    const struct ctrl_meta *axes_meta = saturn_get_axes_meta(wired_data->index);
+    const uint8_t *axes_idx = saturn_get_axes_idx(wired_data->index);
 
     map_mask->buttons = 0x0000;
     map_mask->sticks = 0x0000;
@@ -465,7 +566,7 @@ void IRAM_ATTR saturn_gen_turbo_mask(struct wired_data *wired_data) {
     wired_gen_turbo_mask_btns16_neg(wired_data, &map_mask->buttons, saturn_btns_mask);
 
     for (uint32_t i = 0; i < ADAPTER_MAX_AXES; i++) {
-        if (i == 2 || i == 3) {
+        if (!saturn_axis_supported(wired_data->index, i)) {
             continue;
         }
 
@@ -474,12 +575,12 @@ void IRAM_ATTR saturn_gen_turbo_mask(struct wired_data *wired_data) {
         if (mask) {
             if (wired_data->cnt_mask[btn_id] & 1) {
                 if (!(mask & wired_data->frame_cnt)) {
-                    map_mask->axes[saturn_axes_idx[i]] = saturn_axes_meta[i].neutral;
+                    map_mask->axes[axes_idx[i]] = axes_meta[i].neutral;
                 }
             }
             else {
                 if (!((mask & wired_data->frame_cnt) == mask)) {
-                    map_mask->axes[saturn_axes_idx[i]] = saturn_axes_meta[i].neutral;
+                    map_mask->axes[axes_idx[i]] = axes_meta[i].neutral;
                 }
             }
         }

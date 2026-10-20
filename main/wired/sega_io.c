@@ -47,6 +47,7 @@
 #define SIO_U 6
 
 #define ID0_GENESIS_PAD 0x00 //TBD
+#define ID0_GENESIS_XBAND_KB 0xC369
 #define ID0_MOUSE 0x0B
 #define ID0_GENESIS_MULTITAP 0x00 //TBD
 #define ID0_SATURN_PAD 0xC0
@@ -74,6 +75,8 @@
 
 #define ID2_SATURN_PAD 0x0
 #define ID2_SATURN_ANALOG_PAD 0x1
+#define ID2_SATURN_RACING 0x1
+#define ID2_SATURN_MISSION 0x1
 #define ID2_SATURN_POINTING 0x2
 #define ID2_SATURN_KB 0x3
 #define ID2_SATURN_MULTITAP 0x4
@@ -119,6 +122,8 @@ enum {
     DEV_SATURN_DIGITAL,
     DEV_SATURN_DIGITAL_TWH,
     DEV_SATURN_ANALOG,
+    DEV_SATURN_RACING,
+    DEV_SATURN_MISSION,
     DEV_SATURN_MULTITAP,
     DEV_SATURN_KB,
     DEV_EA_MULTITAP,
@@ -139,6 +144,17 @@ static uint32_t id0_hi[2];
 static uint8_t dev_type[2] = {0};
 static uint8_t mt_dev_type[2][MT_PORT_MAX] = {0};
 static uint8_t mt_first_port[2] = {0};
+
+static uint8_t saturn_alt_dev_type(uint8_t out_idx) {
+    switch (config.out_cfg[out_idx].acc_mode) {
+        case ACC_MEM:
+            return DEV_SATURN_MISSION;
+        case ACC_RUMBLE:
+            return DEV_SATURN_RACING;
+        default:
+            return DEV_SATURN_ANALOG;
+    }
+}
 static uint8_t buffer[6*6];
 static uint32_t *map1 = wired_adapter.data[0].output32;
 static uint32_t *map2 = wired_adapter.data[1].output32;
@@ -290,6 +306,89 @@ end:
     ;
 }
 
+static inline uint8_t genesis_kb_start_is_high(uint8_t port) {
+    return GPIO.in1.val & BIT(gpio_pin[port][SIO_TH] - 32);
+}
+
+static uint8_t genesis_kb_wait_req(uint8_t port, uint8_t high) {
+    uint32_t timeout = 0;
+
+    while (!!(GPIO.in & BIT(gpio_pin[port][SIO_TR])) != high) {
+        if (genesis_kb_start_is_high(port) || timeout++ > TWH_TIMEOUT) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static uint8_t genesis_kb_tx_byte(uint8_t port, uint8_t data) {
+    if (genesis_kb_wait_req(port, 1)) {
+        return 1;
+    }
+    tx_nibble(port, data >> 4);
+    set_sio(port, SIO_TL, 1);
+
+    if (genesis_kb_wait_req(port, 0)) {
+        return 1;
+    }
+    tx_nibble(port, data & 0xF);
+    set_sio(port, SIO_TL, 0);
+
+    return 0;
+}
+
+static void set_genesis_keyboard(uint8_t port, uint8_t src_port) {
+    uint32_t len = 0;
+    uint8_t data[16] = {0};
+    uint8_t data_len = 0;
+
+    if (genesis_kb_start_is_high(port)) {
+        goto cleanup;
+    }
+
+    tx_nibble(port, 0x3);
+
+    if (genesis_kb_wait_req(port, 0)) {
+        goto cleanup;
+    }
+    tx_nibble(port, 0x6);
+    set_sio(port, SIO_TL, 0);
+
+    if (genesis_kb_wait_req(port, 1)) {
+        goto cleanup;
+    }
+    tx_nibble(port, 0x9);
+    set_sio(port, SIO_TL, 1);
+
+    if (genesis_kb_wait_req(port, 0)) {
+        goto cleanup;
+    }
+
+    data[0] = 0x00;
+    if (!kbmon_get_code(src_port, &data[1], &len)) {
+        data_len = len + 1;
+    }
+
+    tx_nibble(port, data_len);
+    set_sio(port, SIO_TL, 0);
+
+    for (uint32_t i = 0; i < data_len; i++) {
+        if (genesis_kb_tx_byte(port, data[i])) {
+            break;
+        }
+    }
+
+    /* Bounded like every other wait in this driver: a console that stops
+     * polling mid transfer (reset, power off) must not hang the port loop. */
+    for (uint32_t timeout = 0; !genesis_kb_start_is_high(port) && timeout < TWH_TIMEOUT; timeout++) {
+        ;
+    }
+
+cleanup:
+    tx_nibble(port, ID0_GENESIS_XBAND_KB >> 12);
+    set_sio(port, SIO_TL, 1);
+}
+
 /* Saturn analog pad digital mode */
 static void set_analog_digital_pad(uint8_t port, uint8_t src_port) {
     buffer[0] = (ID2_SATURN_PAD << 4) | 2;
@@ -316,6 +415,38 @@ static void set_analog_pad(uint8_t port, uint8_t src_port) {
     buffer[7] = ID0_SATURN_THREEWIRE_HANDSHAKE >> 4;
 
     twh_tx(port, buffer, 8, 0);
+    ++wired_adapter.data[src_port].frame_cnt;
+    saturn_gen_turbo_mask(&wired_adapter.data[src_port]);
+}
+
+/* Saturn racing controller */
+static void set_racing_controller(uint8_t port, uint8_t src_port) {
+    buffer[0] = (ID2_SATURN_RACING << 4) | 3;
+    buffer[1] = wired_adapter.data[src_port].output[0] | wired_adapter.data[src_port].output_mask[0];
+    buffer[2] = (wired_adapter.data[src_port].output[1] | wired_adapter.data[src_port].output_mask[1]) | 0x8F;
+    buffer[3] = (wired_adapter.data[src_port].output_mask[2]) ?
+        wired_adapter.data[src_port].output_mask[2] : wired_adapter.data[src_port].output[2];
+    buffer[4] = ID0_SATURN_THREEWIRE_HANDSHAKE >> 4;
+
+    twh_tx(port, buffer, 5, 0);
+    ++wired_adapter.data[src_port].frame_cnt;
+    saturn_gen_turbo_mask(&wired_adapter.data[src_port]);
+}
+
+/* Saturn mission stick */
+static void set_mission_stick(uint8_t port, uint8_t src_port) {
+    buffer[0] = (ID2_SATURN_MISSION << 4) | 5;
+    buffer[1] = wired_adapter.data[src_port].output[0] | wired_adapter.data[src_port].output_mask[0];
+    buffer[2] = wired_adapter.data[src_port].output[1] | wired_adapter.data[src_port].output_mask[1];
+    buffer[3] = (wired_adapter.data[src_port].output_mask[2]) ?
+        wired_adapter.data[src_port].output_mask[2] : wired_adapter.data[src_port].output[2];
+    buffer[4] = (wired_adapter.data[src_port].output_mask[3]) ?
+        wired_adapter.data[src_port].output_mask[3] : wired_adapter.data[src_port].output[3];
+    buffer[5] = (wired_adapter.data[src_port].output_mask[4]) ?
+        wired_adapter.data[src_port].output_mask[4] : wired_adapter.data[src_port].output[4];
+    buffer[6] = ID0_SATURN_THREEWIRE_HANDSHAKE >> 4;
+
+    twh_tx(port, buffer, 7, 0);
     ++wired_adapter.data[src_port].frame_cnt;
     saturn_gen_turbo_mask(&wired_adapter.data[src_port]);
 }
@@ -376,6 +507,28 @@ static void set_saturn_multitap(uint8_t port, uint8_t first_port, uint8_t nb_por
                 }
                 *data++ = wired_adapter.data[j].output[4] & wired_adapter.data[j].output_mask[4];
                 *data++ = wired_adapter.data[j].output[5] & wired_adapter.data[j].output_mask[5];
+                ++wired_adapter.data[j].frame_cnt;
+                saturn_gen_turbo_mask(&wired_adapter.data[j]);
+                break;
+            case DEV_SATURN_RACING:
+                *data++ = (ID2_SATURN_RACING << 4) | 3;
+                *data++ = wired_adapter.data[j].output[0] | wired_adapter.data[j].output_mask[0];
+                *data++ = (wired_adapter.data[j].output[1] | wired_adapter.data[j].output_mask[1]) | 0x8F;
+                *data++ = (wired_adapter.data[j].output_mask[2]) ?
+                    wired_adapter.data[j].output_mask[2] : wired_adapter.data[j].output[2];
+                ++wired_adapter.data[j].frame_cnt;
+                saturn_gen_turbo_mask(&wired_adapter.data[j]);
+                break;
+            case DEV_SATURN_MISSION:
+                *data++ = (ID2_SATURN_MISSION << 4) | 5;
+                *data++ = wired_adapter.data[j].output[0] | wired_adapter.data[j].output_mask[0];
+                *data++ = wired_adapter.data[j].output[1] | wired_adapter.data[j].output_mask[1];
+                *data++ = (wired_adapter.data[j].output_mask[2]) ?
+                    wired_adapter.data[j].output_mask[2] : wired_adapter.data[j].output[2];
+                *data++ = (wired_adapter.data[j].output_mask[3]) ?
+                    wired_adapter.data[j].output_mask[3] : wired_adapter.data[j].output[3];
+                *data++ = (wired_adapter.data[j].output_mask[4]) ?
+                    wired_adapter.data[j].output_mask[4] : wired_adapter.data[j].output[4];
                 ++wired_adapter.data[j].frame_cnt;
                 saturn_gen_turbo_mask(&wired_adapter.data[j]);
                 break;
@@ -730,6 +883,20 @@ p1_poll_start:
                     goto next_poll;
                 }
             }
+            else if (dev_type[0] == DEV_GENESIS_XBAND_KB) {
+                if (lock) {
+                    core0_stall_end();
+                    lock = 0;
+                }
+                set_genesis_keyboard(0, mt_first_port[0]);
+                if (GPIO.in1.val & BIT(P1_TH_PIN - 32)) {
+                    GPIO.out = (map1[0] | map1_mask[0]) & p2_out0;
+                    GPIO.out1.val = (map1[3] | map1_mask[3]) & p2_out1;
+                    p1_out0 = GPIO.out | ~P1_OUT0_MASK;
+                    p1_out1 = GPIO.out1.val | ~P1_OUT1_MASK;
+                    goto next_poll;
+                }
+            }
             timeout = 0;
             cur_in = prev_in = GPIO.in1.val;
             while (!(change = (cur_in ^ prev_in) & GEN_TH_MASK)) {
@@ -914,6 +1081,20 @@ p2_poll_start:
                     goto next_poll;
                 }
             }
+            else if (dev_type[1] == DEV_GENESIS_XBAND_KB) {
+                if (lock) {
+                    core0_stall_end();
+                    lock = 0;
+                }
+                set_genesis_keyboard(1, mt_first_port[1]);
+                if (GPIO.in1.val & BIT(P2_TH_PIN - 32)) {
+                    GPIO.out = p1_out0 & (map2[0] | map2_mask[0]);
+                    GPIO.out1.val = p1_out1 & (map2[3] | map2_mask[3]);
+                    p2_out0 = GPIO.out | ~P2_OUT0_MASK;
+                    p2_out1 = GPIO.out1.val | ~P2_OUT1_MASK;
+                    goto next_poll;
+                }
+            }
             timeout = 0;
             cur_in = prev_in = GPIO.in1.val;
             while (!(change = (cur_in ^ prev_in) & GEN_TH_MASK)) {
@@ -1067,6 +1248,12 @@ static void sega_saturn_task(void) {
                 case DEV_SATURN_ANALOG:
                     set_analog_pad(0, mt_first_port[0]);
                     break;
+                case DEV_SATURN_RACING:
+                    set_racing_controller(0, mt_first_port[0]);
+                    break;
+                case DEV_SATURN_MISSION:
+                    set_mission_stick(0, mt_first_port[0]);
+                    break;
                 case DEV_SATURN_MULTITAP:
                     set_saturn_multitap(0, mt_first_port[0], MT_PORT_MAX);
                     break;
@@ -1104,6 +1291,12 @@ p1_set_id0_hi:
                     break;
                 case DEV_SATURN_ANALOG:
                     set_analog_pad(1, mt_first_port[1]);
+                    break;
+                case DEV_SATURN_RACING:
+                    set_racing_controller(1, mt_first_port[1]);
+                    break;
+                case DEV_SATURN_MISSION:
+                    set_mission_stick(1, mt_first_port[1]);
                     break;
                 case DEV_SATURN_MULTITAP:
                     set_saturn_multitap(1, mt_first_port[1], MT_PORT_MAX);
@@ -1200,12 +1393,14 @@ void sega_io_init(uint32_t package) {
         for (uint32_t i = 0; i < ARRAY_SIZE(gpio_pin); i++) {
             if (dev_type[i] == DEV_SATURN_MULTITAP) {
                 for (uint32_t j = 0; j < MT_PORT_MAX; j++) {
-                    switch (config.out_cfg[port_cnt++].dev_mode) {
+                    uint8_t out_idx = port_cnt++;
+
+                    switch (config.out_cfg[out_idx].dev_mode) {
                         case DEV_PAD:
                             mt_dev_type[i][j] = DEV_SATURN_DIGITAL_TWH;
                             break;
                         case DEV_PAD_ALT:
-                            mt_dev_type[i][j] = DEV_SATURN_ANALOG;
+                            mt_dev_type[i][j] = saturn_alt_dev_type(out_idx);
                             break;
                         case DEV_KB:
                             mt_dev_type[i][j] = DEV_SATURN_KB;
@@ -1217,12 +1412,14 @@ void sega_io_init(uint32_t package) {
                 }
             }
             else if (dev_type[i] == DEV_NONE) {
-                switch (config.out_cfg[port_cnt++].dev_mode) {
+                uint8_t out_idx = port_cnt++;
+
+                switch (config.out_cfg[out_idx].dev_mode) {
                     case DEV_PAD:
                         dev_type[i] = DEV_SATURN_DIGITAL_TWH;
                         break;
                     case DEV_PAD_ALT:
-                        dev_type[i] = DEV_SATURN_ANALOG;
+                        dev_type[i] = saturn_alt_dev_type(out_idx);
                         break;
                     case DEV_KB:
                         dev_type[i] = DEV_SATURN_KB;
@@ -1282,6 +1479,9 @@ void sega_io_init(uint32_t package) {
                         case DEV_MOUSE:
                             mt_dev_type[i][j] = DEV_SEGA_MOUSE;
                             break;
+                        case DEV_KB:
+                            mt_dev_type[i][j] = DEV_GENESIS_XBAND_KB;
+                            break;
                     }
                 }
             }
@@ -1296,6 +1496,9 @@ void sega_io_init(uint32_t package) {
                     case DEV_MOUSE:
                         dev_type[i] = DEV_SEGA_MOUSE;
                         break;
+                    case DEV_KB:
+                        dev_type[i] = DEV_GENESIS_XBAND_KB;
+                        break;
                 }
             }
         }
@@ -1303,8 +1506,8 @@ void sega_io_init(uint32_t package) {
 
     /* TH */
     for (uint32_t i = 0; i < ARRAY_SIZE(gpio_pin); i++) {
-        if (dev_type[i] == DEV_SATURN_ANALOG || dev_type[i] == DEV_SATURN_DIGITAL_TWH
-            || dev_type[i] == DEV_SATURN_MULTITAP || dev_type[i] == DEV_SATURN_KB) {
+        if (dev_type[i] == DEV_SATURN_ANALOG || dev_type[i] == DEV_SATURN_RACING || dev_type[i] == DEV_SATURN_MISSION
+            || dev_type[i] == DEV_SATURN_DIGITAL_TWH || dev_type[i] == DEV_SATURN_MULTITAP || dev_type[i] == DEV_SATURN_KB) {
             io_conf.intr_type = GPIO_INTR_NEGEDGE;
         }
         else {
@@ -1372,6 +1575,9 @@ void sega_io_init(uint32_t package) {
                     id0_lo[i] = P2_MOUSE_ID0_LO;
                 }
                 break;
+            case DEV_GENESIS_XBAND_KB:
+                tx_nibble(i, ID0_GENESIS_XBAND_KB >> 12);
+                break;
             case DEV_SATURN_DIGITAL:
                 tx_nibble(i, ID0_SATURN_PAD >> 4);
                 if (i == 0) {
@@ -1385,6 +1591,8 @@ void sega_io_init(uint32_t package) {
                 break;
             case DEV_SATURN_DIGITAL_TWH:
             case DEV_SATURN_ANALOG:
+            case DEV_SATURN_RACING:
+            case DEV_SATURN_MISSION:
             case DEV_SATURN_MULTITAP:
             case DEV_SATURN_KB:
                 tx_nibble(i, ID0_SATURN_THREEWIRE_HANDSHAKE >> 4);

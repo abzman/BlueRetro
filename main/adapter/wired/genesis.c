@@ -5,6 +5,7 @@
 
 #include <string.h>
 #include "adapter/config.h"
+#include "adapter/kb_monitor.h"
 #include "adapter/wired/wired.h"
 #include "system/manager.h"
 #include "zephyr/types.h"
@@ -12,6 +13,7 @@
 #include "tests/cmds.h"
 #include "bluetooth/mon.h"
 #include "genesis.h"
+#include "saturn.h"
 #include "driver/gpio.h"
 
 #define P1_TH_PIN 35
@@ -373,6 +375,63 @@ static void genesis_ea_from_generic(struct wired_ctrl *ctrl_data, struct wired_d
     memcpy(wired_data->output, (void *)&map_tmp, sizeof(map_tmp));
 }
 
+static uint8_t genesis_kb_is_extended(uint8_t id) {
+    switch (id) {
+        case KB_RIGHT:
+        case KB_LEFT:
+        case KB_DOWN:
+        case KB_UP:
+        case KB_HOME:
+        case KB_PAGEUP:
+        case KB_DEL:
+        case KB_END:
+        case KB_PAGEDOWN:
+        case KB_INSERT:
+        case KB_RCTRL:
+        case KB_RALT:
+        case KB_KP_DIV:
+        case KB_KP_ENTER:
+            return 1;
+    }
+    return 0;
+}
+
+static void genesis_kb_id_to_scancode(uint32_t dev_id, uint8_t type, uint8_t id) {
+    uint8_t kb_buf[4] = {0};
+    uint32_t len = 0;
+    uint8_t code = 0;
+
+    if (id >= KBM_MAX) {
+        return;
+    }
+
+    code = saturn_kb_scancode[id];
+    if (!code) {
+        return;
+    }
+
+    if (genesis_kb_is_extended(id)) {
+        kb_buf[len++] = 0xE0;
+    }
+
+    if (type == KBMON_TYPE_BREAK) {
+        kb_buf[len++] = 0xF0;
+    }
+
+    kb_buf[len++] = code;
+    kbmon_set_code(dev_id, kb_buf, len);
+}
+
+static void genesis_kb_from_generic(struct wired_ctrl *ctrl_data, struct wired_data *wired_data) {
+    if (!atomic_test_bit(&wired_data->flags, WIRED_KBMON_INIT)) {
+        kbmon_init(ctrl_data->index, genesis_kb_id_to_scancode);
+        kbmon_set_typematic(ctrl_data->index, 1, 500000, 33333);
+        atomic_set_bit(&wired_data->flags, WIRED_KBMON_INIT);
+    }
+
+    kbmon_update(ctrl_data->index, ctrl_data);
+}
+
 void IRAM_ATTR genesis_init_buffer(int32_t dev_mode, struct wired_data *wired_data) {
     /* Hackish but wtv */
     struct genesis_map *map1 = (struct genesis_map *)wired_adapter.data[0].output;
@@ -445,7 +504,11 @@ void IRAM_ATTR genesis_init_buffer(int32_t dev_mode, struct wired_data *wired_da
     memset(map1_mask->buttons_high, 0, sizeof(map1_mask->buttons_high));
     memset(map2_mask->buttons_high, 0, sizeof(map2_mask->buttons_high));
 
-    if (dev_mode == DEV_MOUSE) {
+    if (dev_mode == DEV_KB) {
+        memset(wired_data->output, 0, 8);
+        memset(wired_data->output_mask, 0, 8);
+    }
+    else if (dev_mode == DEV_MOUSE) {
         struct sega_mouse_map *map = (struct sega_mouse_map *)wired_data->output;
         map->twh_buttons = 0x00;
         for (uint32_t i = 0; i < 2; i++) {
@@ -467,8 +530,10 @@ void genesis_meta_init(struct wired_ctrl *ctrl_data) {
     for (uint32_t i = 0; i < WIRED_MAX_DEV; i++) {
         for (uint32_t j = 0; j < ADAPTER_MAX_AXES; j++) {
             switch (config.out_cfg[i].dev_mode) {
-                //case DEV_KB:
-                //    goto exit_axes_loop;
+                case DEV_KB:
+                    ctrl_data[i].mask = saturn_kb_mask;
+                    ctrl_data[i].desc = saturn_kb_desc;
+                    goto exit_axes_loop;
                 case DEV_MOUSE:
                     ctrl_data[i].mask = sega_mouse_mask;
                     ctrl_data[i].desc = sega_mouse_desc;
@@ -487,8 +552,9 @@ exit_axes_loop:
 
 void genesis_from_generic(int32_t dev_mode, struct wired_ctrl *ctrl_data, struct wired_data *wired_data) {
     switch (dev_mode) {
-        //case DEV_KB:
-        //    break;
+        case DEV_KB:
+            genesis_kb_from_generic(ctrl_data, wired_data);
+            break;
         case DEV_MOUSE:
             sega_mouse_from_generic(ctrl_data, wired_data);
             break;
