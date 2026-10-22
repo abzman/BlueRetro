@@ -101,6 +101,13 @@ enum {
 #define P1_ANALOG_LED_PIN 12
 #define P2_ANALOG_LED_PIN 15
 
+/* PS2 multitap slot lines driven by the memory card side helper */
+#define P1_MT_SLOT_B0_PIN 18
+#define P1_MT_SLOT_B1_PIN 23
+
+/* Longest gap between two slot polls of the same padman cycle */
+#define PS2_MT_SLOT_GAP_US 3000
+
 #define PS_SPI_DTR 0
 #define PS_SPI_SCK 1
 #define PS_SPI_TXD 2
@@ -141,6 +148,8 @@ struct ps_ctrl_port {
     uint32_t idx;
     uint32_t mt_idx;
     uint32_t valid;
+    uint32_t ps2_mt_slot;
+    uint32_t ps2_mt_end;
 };
 
 static struct ps_ctrl_port ps_ctrl_ports[PS_PORT_MAX] = {
@@ -187,6 +196,8 @@ static struct ps_ctrl_port ps_ctrl_ports[PS_PORT_MAX] = {
         .spi_hw = &SPI3,
     }
 };
+
+static uint32_t ps2_mt_wired;
 
 static inline void load_mouse_axes(uint8_t port, uint8_t *axes) {
     uint8_t *relative = (uint8_t *)(wired_adapter.data[port].output + 2);
@@ -250,6 +261,27 @@ static void set_output_state(uint32_t port, uint32_t enable) {
             gpio_set_direction_iram(P2_DSR_PIN, GPIO_MODE_INPUT);
         }
     }
+}
+
+/* A PS2 multitap selects its slot on the memory card bus, which we can't see.
+ * Use the helper's slot lines once they have shown a slot other than 0, else
+ * infer it from the poll order: padman polls every open slot once per VBlank,
+ * in slot order, back to back. */
+static uint32_t ps2_mt_get_slot(struct ps_ctrl_port *port) {
+    if (port->id == 0) {
+        uint32_t slot = ((GPIO.in >> P1_MT_SLOT_B0_PIN) & 0x1) | (((GPIO.in >> P1_MT_SLOT_B1_PIN) & 0x1) << 1);
+        if (slot) {
+            ps2_mt_wired = 1;
+        }
+        if (ps2_mt_wired) {
+            return slot;
+        }
+    }
+    if (xthal_get_ccount() - port->ps2_mt_end > PS2_MT_SLOT_GAP_US * CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ
+            || port->ps2_mt_slot >= MT_PORT_MAX - 1) {
+        return 0;
+    }
+    return port->ps2_mt_slot + 1;
 }
 
 static void toggle_dsr(uint32_t port) {
@@ -699,6 +731,7 @@ static void packet_end(void *arg) {
     for (uint32_t i = 0; i < PS_PORT_MAX; i++) {
         if (port_int[i]) {
             struct ps_ctrl_port *port = &ps_ctrl_ports[i];
+            port->ps2_mt_end = xthal_get_ccount();
             set_output_state(port->id, 0);
             port->idx = 0;
             port->mt_idx = 0;
@@ -715,9 +748,9 @@ static void packet_end(void *arg) {
                         }
                     }
                     else {
-                        ps_analog_btn_hdlr(port, 0);
-                        ps_cmd_req_hdlr(port, 0, port->rx_buf[port->active_rx_buf][1], &port->rx_buf[port->active_rx_buf][2]);
-                        ps_gen_turbo_mask(&wired_adapter.data[port->id]);
+                        ps_analog_btn_hdlr(port, port->ps2_mt_slot);
+                        ps_cmd_req_hdlr(port, port->ps2_mt_slot, port->rx_buf[port->active_rx_buf][1], &port->rx_buf[port->active_rx_buf][2]);
+                        ps_gen_turbo_mask(&wired_adapter.data[port->mt_first_port + port->ps2_mt_slot]);
                     }
                     if (port->root_dev_type == DEV_PSX_MULTITAP) {
                         port->mt_state = port->rx_buf[port->active_rx_buf][2];
@@ -797,7 +830,10 @@ static void spi_isr(void* arg) {
                     port->tx_buf[2] = 0x5A;
                 }
                 else {
-                    port->tx_buf[1] = port->dev_id[0];
+                    if (port->root_dev_type == DEV_PS2_MULTITAP) {
+                        port->ps2_mt_slot = ps2_mt_get_slot(port);
+                    }
+                    port->tx_buf[1] = port->dev_id[port->ps2_mt_slot];
                 }
             }
             else if (port->rx_buf[port->active_rx_buf][0] == 0x81) {
@@ -854,12 +890,12 @@ static void spi_isr(void* arg) {
                         goto early_end;
                     }
                     else {
-                        ps_cmd_rsp_hdlr(port, 0, port->rx_buf[port->active_rx_buf][1], &port->tx_buf[2]);
+                        ps_cmd_rsp_hdlr(port, port->ps2_mt_slot, port->rx_buf[port->active_rx_buf][1], &port->tx_buf[2]);
                     }
                 }
                 else if (port->idx == 3 && (port->rx_buf[port->active_rx_buf][1] == 0x46 || port->rx_buf[port->active_rx_buf][1] == 0x4C)
                         && port->rx_buf[port->active_rx_buf][3] == 0x01) {
-                    ps_cmd_const_rsp_hdlr(port, 0, port->rx_buf[port->active_rx_buf][1], &port->tx_buf[4]);
+                    ps_cmd_const_rsp_hdlr(port, port->ps2_mt_slot, port->rx_buf[port->active_rx_buf][1], &port->tx_buf[4]);
                 }
             }
         }
@@ -943,8 +979,21 @@ void ps_spi_init(uint32_t package) {
             ps_ctrl_ports[1].root_dev_type = DEV_PSX_MULTITAP;
             ps_ctrl_ports[1].mt_first_port = MT_PORT_MAX;
             break;
+        case MT_ALT:
+            /* PS2 multitap, its slot select happens on the memory card slot */
+            ps_ctrl_ports[0].root_dev_type = DEV_PS2_MULTITAP;
+            ps_ctrl_ports[1].mt_first_port = MT_PORT_MAX;
+            break;
         default:
             ps_ctrl_ports[1].mt_first_port = 1;
+    }
+    if (ps_ctrl_ports[0].root_dev_type == DEV_PS2_MULTITAP) {
+        gpio_set_pull_mode_iram(P1_MT_SLOT_B0_PIN, GPIO_PULLDOWN_ONLY);
+        gpio_set_direction_iram(P1_MT_SLOT_B0_PIN, GPIO_MODE_INPUT);
+        PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[P1_MT_SLOT_B0_PIN], PIN_FUNC_GPIO);
+        gpio_set_pull_mode_iram(P1_MT_SLOT_B1_PIN, GPIO_PULLDOWN_ONLY);
+        gpio_set_direction_iram(P1_MT_SLOT_B1_PIN, GPIO_MODE_INPUT);
+        PIN_FUNC_SELECT(GPIO_PIN_MUX_REG_IRAM[P1_MT_SLOT_B1_PIN], PIN_FUNC_GPIO);
     }
     for (uint32_t i = 0; i < PS_PORT_MAX; i++) {
         for (uint32_t j = 0; j < MT_PORT_MAX; j++) {
