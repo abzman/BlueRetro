@@ -263,7 +263,7 @@ static void config_init_struct(struct config *data) {
 
     for (uint32_t i = 0; i < WIRED_MAX_DEV; i++) {
         data->out_cfg[i].dev_mode = DEV_PAD;
-#ifdef CONFIG_BLUERETRO_HW2_IBLUECONTROLMOD
+#if defined(CONFIG_BLUERETRO_HW2_IBLUECONTROLMOD) || defined(CONFIG_BLUERETRO_DEFAULT_ACC_RUMBLE)
         data->out_cfg[i].acc_mode = ACC_RUMBLE;
 #else
         data->out_cfg[i].acc_mode = ACC_NONE;

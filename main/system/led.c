@@ -10,6 +10,7 @@
 #include "system/gpio.h"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
+#include "esp_rom_gpio.h"
 #include "adapter/config.h"
 #include "led.h"
 
@@ -117,3 +118,57 @@ uint32_t err_led_get_pin(void) {
 uint32_t err_led_get_inv(void) {
     return ERR_LED_INV;
 }
+
+#ifdef CONFIG_BLUERETRO_RETROSCALER_4LED
+#define BT_LED_P1_PIN 14
+#define BT_LED_P2_PIN 32
+#define BT_LED_P3_PIN 33
+#define BT_LED_P4_PIN 25
+
+void bt_leds_init(void) {
+    esp_rom_gpio_pad_select_gpio(BT_LED_P1_PIN);
+    esp_rom_gpio_pad_select_gpio(BT_LED_P2_PIN);
+    esp_rom_gpio_pad_select_gpio(BT_LED_P3_PIN);
+    esp_rom_gpio_pad_select_gpio(BT_LED_P4_PIN);
+
+    gpio_set_pull_mode(BT_LED_P1_PIN, GPIO_PULLDOWN_ONLY);
+    gpio_set_pull_mode(BT_LED_P2_PIN, GPIO_PULLDOWN_ONLY);
+    gpio_set_pull_mode(BT_LED_P3_PIN, GPIO_PULLDOWN_ONLY);
+    gpio_set_pull_mode(BT_LED_P4_PIN, GPIO_PULLDOWN_ONLY);
+
+    gpio_set_direction(BT_LED_P1_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_direction(BT_LED_P2_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_direction(BT_LED_P3_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_direction(BT_LED_P4_PIN, GPIO_MODE_OUTPUT);
+}
+
+void bt_led_set(uint8_t index) {
+    if (index == 0) {
+        gpio_set_level(BT_LED_P1_PIN, 1);
+    }
+    else if (index == 1) {
+        gpio_set_level(BT_LED_P2_PIN, 1);
+    }
+    else if (index == 2) {
+        gpio_set_level(BT_LED_P3_PIN, 1);
+    }
+    else if (index == 3) {
+        gpio_set_level(BT_LED_P4_PIN, 1);
+    }
+}
+
+void bt_led_clear(uint8_t index) {
+    if (index == 0) {
+        gpio_set_level(BT_LED_P1_PIN, 0);
+    }
+    else if (index == 1) {
+        gpio_set_level(BT_LED_P2_PIN, 0);
+    }
+    else if (index == 2) {
+        gpio_set_level(BT_LED_P3_PIN, 0);
+    }
+    else if (index == 3) {
+        gpio_set_level(BT_LED_P4_PIN, 0);
+    }
+}
+#endif /* CONFIG_BLUERETRO_RETROSCALER_4LED */

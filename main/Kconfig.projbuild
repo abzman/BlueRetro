@@ -28,6 +28,21 @@ menu "BlueRetro"
             Bluetooth TX power and keep the radio quiet while the console
             boots.
 
+    config BLUERETRO_RETROSCALER_4LED
+        bool "Enable RetroScaler 4 ports BT status LEDs"
+        default n
+        help
+            Select this to drive the 4 BT status LEDs found on the RetroScaler
+            4 ports adapter (GPIO 14, 32, 33 & 25). A LED turns on once the
+            matching BT device is identified and turns off on disconnect.
+
+    config BLUERETRO_DEFAULT_ACC_RUMBLE
+        bool "Default accessories mode to rumble"
+        default n
+        help
+            Select this to set the default config accessories mode to rumble
+            instead of none.
+
     choice
         prompt "Select universal or specific system"
         default BLUERETRO_SYSTEM_UNIVERSAL

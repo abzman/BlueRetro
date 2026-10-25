@@ -10,6 +10,7 @@
 #include "att_cfg.h"
 #include "att_hid.h"
 #include "mon.h"
+#include "system/led.h"
 #include "zephyr/uuid.h"
 #include "zephyr/att.h"
 #include "zephyr/gatt.h"
@@ -155,7 +156,7 @@ static void bt_att_hid_process_device_name(struct bt_dev *device,
 
     bt_hid_set_type_flags_from_name(device, hid_data->device_name);
     printf("dev: %ld type: %ld %s\n", device->ids.id, device->ids.type, hid_data->device_name);
-
+    bt_led_set(device->ids.id);
     bt_mon_log(true, "dev: %ld type: %ld %s\n", device->ids.id, device->ids.type, hid_data->device_name);
 
     if (device->ids.type == BT_PBP) {

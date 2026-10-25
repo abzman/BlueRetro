@@ -1801,6 +1801,7 @@ void bt_hci_evt_hdlr(struct bt_hci_pkt *bt_hci_evt_pkt) {
                     bt_host_clear_le_ltk(&device->le_remote_bdaddr);
                 }
                 bt_hci_disarm_conn_watchdog(device);
+                bt_led_clear(device->ids.id);
                 bt_host_reset_dev(device);
                 if (bt_host_get_active_dev(&device) == BT_NONE) {
                     if (config.global_cfg.inquiry_mode == INQ_AUTO) {
@@ -1910,6 +1911,7 @@ void bt_hci_evt_hdlr(struct bt_hci_pkt *bt_hci_evt_pkt) {
                         bt_hci_cmd_auth_requested(&device->acl_handle);
                     }
                     printf("dev: %ld type: %ld:%ld %s\n", device->ids.id, device->ids.type, device->ids.subtype, remote_name_req_complete->name);
+                    bt_led_set(device->ids.id);
                     bt_mon_log(true, "dev: %ld type: %ld:%ld %s\n", device->ids.id, device->ids.type, device->ids.subtype, remote_name_req_complete->name);
                 }
             }
