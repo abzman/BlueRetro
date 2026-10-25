@@ -254,6 +254,57 @@ static int32_t hw_config_lookup_key_name(const char* key) {
     return -1;
 }
 
+static uint8_t config_default_acc_mode(uint32_t index) {
+    uint8_t acc_mode = ACC_NONE;
+
+#if defined(CONFIG_BLUERETRO_HW2_IBLUECONTROLMOD) || defined(CONFIG_BLUERETRO_DEFAULT_ACC_RUMBLE)
+    acc_mode = ACC_RUMBLE;
+#endif
+#ifdef CONFIG_BLUERETRO_DEFAULT_ACC_P1_MEM
+    if (index == 0) {
+        acc_mode |= ACC_MEM;
+    }
+#endif
+    return acc_mode;
+}
+
+#ifndef CONFIG_BLUERETRO_QEMU
+static void config_store_acc_rev(void) {
+#if CONFIG_BLUERETRO_DEFAULT_ACC_APPLY_REV
+    nvs_handle_t nvs;
+
+    if (nvs_open("retroscaler", NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_u32(nvs, "acc_rev", CONFIG_BLUERETRO_DEFAULT_ACC_APPLY_REV);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+#endif
+}
+
+/* Apply default accessories mode once per revision on an existing config */
+static void config_apply_acc_defaults(struct config *data, char *filename) {
+#if CONFIG_BLUERETRO_DEFAULT_ACC_APPLY_REV
+    nvs_handle_t nvs;
+    uint32_t rev = 0;
+
+    if (nvs_open("retroscaler", NVS_READONLY, &nvs) == ESP_OK) {
+        nvs_get_u32(nvs, "acc_rev", &rev);
+        nvs_close(nvs);
+    }
+
+    if (rev != CONFIG_BLUERETRO_DEFAULT_ACC_APPLY_REV) {
+        for (uint32_t i = 0; i < WIRED_MAX_DEV; i++) {
+            data->out_cfg[i].acc_mode = config_default_acc_mode(i);
+        }
+        if (config_store_on_file(data, filename) == 0) {
+            config_store_acc_rev();
+            printf("# %s: Applied default accessories rev %d\n", __FUNCTION__, CONFIG_BLUERETRO_DEFAULT_ACC_APPLY_REV);
+        }
+    }
+#endif
+}
+#endif /* CONFIG_BLUERETRO_QEMU */
+
 static void config_init_struct(struct config *data) {
     data->magic = CONFIG_MAGIC;
     data->global_cfg.system_cfg = WIRED_AUTO;
@@ -263,11 +314,7 @@ static void config_init_struct(struct config *data) {
 
     for (uint32_t i = 0; i < WIRED_MAX_DEV; i++) {
         data->out_cfg[i].dev_mode = DEV_PAD;
-#if defined(CONFIG_BLUERETRO_HW2_IBLUECONTROLMOD) || defined(CONFIG_BLUERETRO_DEFAULT_ACC_RUMBLE)
-        data->out_cfg[i].acc_mode = ACC_RUMBLE;
-#else
-        data->out_cfg[i].acc_mode = ACC_NONE;
-#endif
+        data->out_cfg[i].acc_mode = config_default_acc_mode(i);
         data->kb_cfg[i].mode = KB_MODE_FULL_LAYOUT;
         data->kb_cfg[i].layout = KB_LAYOUT_US;
         data->kb_cfg[i].arrangement = KB_ARRANGEMENT_MAC;
@@ -391,6 +438,10 @@ static int32_t config_load_from_file(struct config *data, char *filename) {
         config_init_struct(data);
         config_init_nvs_patch(data);
         ret = config_store_on_file(data, filename);
+        if (ret == 0 && strcmp(filename, CONFIG_FILE) == 0) {
+            /* New config already got the defaults */
+            config_store_acc_rev();
+        }
     }
     else {
         FILE *file = fopen(filename, "rb");
@@ -421,6 +472,10 @@ static int32_t config_load_from_file(struct config *data, char *filename) {
                 }
             }
         }
+    }
+
+    if (ret == 0 && strcmp(filename, CONFIG_FILE) == 0) {
+        config_apply_acc_defaults(data, filename);
     }
 
     return ret;

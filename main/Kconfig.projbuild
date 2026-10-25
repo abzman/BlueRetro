@@ -43,6 +43,24 @@ menu "BlueRetro"
             Select this to set the default config accessories mode to rumble
             instead of none.
 
+    config BLUERETRO_DEFAULT_ACC_P1_MEM
+        bool "Default port 1 accessories mode to include memory"
+        default n
+        help
+            Select this to also enable the memory accessory on port 1 by
+            default (rumble + memory if rumble is the default, memory only
+            otherwise). Other ports keep the default above. Useful for
+            Dreamcast where all ports share the same VMU data.
+
+    config BLUERETRO_DEFAULT_ACC_APPLY_REV
+        int "Revision of default accessories to apply on existing config"
+        default 0
+        help
+            When non-zero, the default accessories mode of each port is
+            written to the existing default config once at boot, if this
+            revision differs from the one stored in NVS. Other settings and
+            game ID configs are not modified. Bump it to re-apply new defaults.
+
     choice
         prompt "Select universal or specific system"
         default BLUERETRO_SYSTEM_UNIVERSAL
