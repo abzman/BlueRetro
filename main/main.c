@@ -156,6 +156,9 @@ static void wl_init_task(void *arg) {
 
 void app_main()
 {
+#ifdef CONFIG_BLUERETRO_HW2_IBLUECONTROLMOD
+    sys_mgr_early_init();
+#endif
     adapter_init();
 
 #ifndef CONFIG_BLUERETRO_QEMU
