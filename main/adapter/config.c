@@ -119,6 +119,7 @@ static uint32_t config_version_magic[] = {
     CONFIG_MAGIC_V1,
     CONFIG_MAGIC_V2,
     CONFIG_MAGIC_V3,
+    CONFIG_MAGIC_V4,
 };
 #ifdef CONFIG_BLUERETRO_SYSTEM_GC
 /* GameCube: Super Smash Bros. Melee resets a match on L+R+A+Start, which is bit for
@@ -149,11 +150,13 @@ static int32_t config_store_on_file(struct config *data, char *filename);
 static int32_t config_v0_update(struct config *data, char *filename);
 static int32_t config_v1_update(struct config *data, char *filename);
 static int32_t config_v2_update(struct config *data, char *filename);
+static int32_t config_v3_update(struct config *data, char *filename);
 
 static int32_t (*config_ver_update[])(struct config *data, char *filename) = {
     config_v0_update,
     config_v1_update,
     config_v2_update,
+    config_v3_update,
     NULL,
 };
 
@@ -231,6 +234,14 @@ static int32_t config_v2_update(struct config *data, char *filename) {
     return config_store_on_file(data, filename);
 }
 
+/* Version 4 appends each output's keyboard settings, zero for full layout, US and Mac */
+static int32_t config_v3_update(struct config *data, char *filename) {
+    memset(data->kb_cfg, 0, sizeof(data->kb_cfg));
+    data->magic = CONFIG_MAGIC;
+
+    return config_store_on_file(data, filename);
+}
+
 static int32_t hw_config_lookup_key_name(const char* key) {
     for (uint32_t i = 0; i < sizeof(hw_config_name_idx)/sizeof(*hw_config_name_idx); i++) {
         if (strstr(key, hw_config_name_idx[i]) != NULL) {
@@ -250,6 +261,9 @@ static void config_init_struct(struct config *data) {
     for (uint32_t i = 0; i < WIRED_MAX_DEV; i++) {
         data->out_cfg[i].dev_mode = DEV_PAD;
         data->out_cfg[i].acc_mode = ACC_NONE;
+        data->kb_cfg[i].mode = KB_MODE_FULL_LAYOUT;
+        data->kb_cfg[i].layout = KB_LAYOUT_US;
+        data->kb_cfg[i].arrangement = KB_ARRANGEMENT_MAC;
         data->in_cfg[i].bt_dev_id = 0x00; /* Not used placeholder */
         data->in_cfg[i].bt_subdev_id = 0x00;  /* Not used placeholder */
         data->in_cfg[i].map_size = KBM_MAX + BR_COMBO_CNT;
