@@ -98,6 +98,94 @@ static const uint32_t hid_pad_xinput_btns_idx[32] = {
     PAD_LJ, PAD_RJ,
 };
 
+static const uint32_t xbox_xinput_mask[4] = {
+    BIT(PAD_LX_LEFT) | BIT(PAD_LX_RIGHT) | BIT(PAD_LY_DOWN) | BIT(PAD_LY_UP) |
+    BIT(PAD_RX_LEFT) | BIT(PAD_RX_RIGHT) | BIT(PAD_RY_DOWN) | BIT(PAD_RY_UP) |
+    BIT(PAD_LD_LEFT) | BIT(PAD_LD_RIGHT) | BIT(PAD_LD_DOWN) | BIT(PAD_LD_UP) |
+    BIT(PAD_RB_LEFT) | BIT(PAD_RB_RIGHT) | BIT(PAD_RB_DOWN) | BIT(PAD_RB_UP) |
+    BIT(PAD_MM) | BIT(PAD_MS) | BIT(PAD_MT) | BIT(PAD_LM) | BIT(PAD_LS) |
+    BIT(PAD_LJ) | BIT(PAD_RM) | BIT(PAD_RS) | BIT(PAD_RJ),
+    0, 0, 0,
+};
+
+static const uint32_t xbox_xinput_desc[4] = {
+    BIT(PAD_LX_LEFT) | BIT(PAD_LX_RIGHT) | BIT(PAD_LY_DOWN) | BIT(PAD_LY_UP) |
+    BIT(PAD_RX_LEFT) | BIT(PAD_RX_RIGHT) | BIT(PAD_RY_DOWN) | BIT(PAD_RY_UP) |
+    BIT(PAD_LM) | BIT(PAD_RM),
+    0, 0, 0,
+};
+
+static const struct ctrl_meta xbox_xinput_axes_meta[ADAPTER_MAX_AXES] = {
+    {.abs_max = 32767 * MAX_PULL_BACK, .abs_min = 32768 * MAX_PULL_BACK},
+    {.abs_max = 32768 * MAX_PULL_BACK, .abs_min = 32767 * MAX_PULL_BACK, .polarity = 1},
+    {.abs_max = 32767 * MAX_PULL_BACK, .abs_min = 32768 * MAX_PULL_BACK},
+    {.abs_max = 32768 * MAX_PULL_BACK, .abs_min = 32767 * MAX_PULL_BACK, .polarity = 1},
+    {.abs_max = 1023 * MAX_PULL_BACK},
+    {.abs_max = 1023 * MAX_PULL_BACK},
+};
+
+static uint16_t hid_get_le16(const uint8_t *data) {
+    return data[0] | ((uint16_t)data[1] << 8);
+}
+
+static int32_t xbox_xinput_to_generic(struct bt_data *bt_data, struct wireless_ctrl *ctrl_data) {
+    const uint8_t *input = bt_data->base.input;
+    uint32_t buttons = 0;
+    uint8_t dpad;
+
+    if (input == NULL || bt_data->base.input_len != 15) {
+        return -1;
+    }
+
+    dpad = input[12] & 0x0F;
+
+    if (input[13] & BIT(0)) buttons |= BIT(PAD_RB_DOWN);
+    if (input[13] & BIT(1)) buttons |= BIT(PAD_RB_RIGHT);
+    if (input[13] & BIT(2)) buttons |= BIT(PAD_RB_LEFT);
+    if (input[13] & BIT(3)) buttons |= BIT(PAD_RB_UP);
+    if (input[13] & BIT(4)) buttons |= BIT(PAD_LS);
+    if (input[13] & BIT(5)) buttons |= BIT(PAD_RS);
+    if (input[13] & BIT(6)) buttons |= BIT(PAD_MS);
+    if (input[13] & BIT(7)) buttons |= BIT(PAD_MM);
+    if (input[14] & BIT(0)) buttons |= BIT(PAD_LJ);
+    if (input[14] & BIT(1)) buttons |= BIT(PAD_RJ);
+    if (input[14] & BIT(4)) buttons |= BIT(PAD_MT);
+    if (dpad > 0 && dpad <= 8) {
+        buttons |= hat_to_ld_btns[dpad - 1];
+    }
+
+    memset(ctrl_data, 0, sizeof(*ctrl_data));
+    ctrl_data->mask = xbox_xinput_mask;
+    ctrl_data->desc = xbox_xinput_desc;
+    ctrl_data->btns[0].value = buttons;
+
+    for (uint32_t i = 0; i < 4; i++) {
+        ctrl_data->axes[i].meta = &bt_data->raw_src_mappings[PAD].meta[i];
+        ctrl_data->axes[i].value = (int32_t)hid_get_le16(input + (i * 2)) - (i % 2 ? 0x7FFF : 0x8000);
+    }
+    for (uint32_t i = 4; i < ADAPTER_MAX_AXES; i++) {
+        ctrl_data->axes[i].meta = &bt_data->raw_src_mappings[PAD].meta[i];
+        ctrl_data->axes[i].value = hid_get_le16(input + (i * 2));
+    }
+
+    if (!atomic_test_bit(&bt_data->base.flags[PAD], BT_INIT)) {
+        memcpy(bt_data->raw_src_mappings[PAD].meta, xbox_xinput_axes_meta, sizeof(xbox_xinput_axes_meta));
+        atomic_set_bit(&bt_data->base.flags[PAD], BT_INIT);
+    }
+
+    TESTS_CMDS_LOG("\"wireless_input\": {\"report_id\": %lu, \"axes\": [%u, %u, %u, %u], \"triggers\": [%u, %u], \"btns\": %lu, \"hat\": %u},\n",
+        (unsigned long)bt_data->base.report_id,
+        (unsigned)hid_get_le16(input),
+        (unsigned)hid_get_le16(input + 2),
+        (unsigned)hid_get_le16(input + 4),
+        (unsigned)hid_get_le16(input + 6),
+        (unsigned)hid_get_le16(input + 8),
+        (unsigned)hid_get_le16(input + 10),
+        (unsigned long)((uint32_t)input[13] | ((uint32_t)input[14] << 8)),
+        (unsigned)dpad);
+    return 0;
+}
+
 static void hid_kb_init(struct hid_report_meta *meta, struct hid_report *report, struct raw_src_mapping *map) {
     memset(map->axes_idx, -1, sizeof(map->axes_idx));
     meta->hid_btn_idx = -1;
@@ -732,6 +820,10 @@ static void hid_pad_to_generic(struct bt_data *bt_data, struct wireless_ctrl *ct
 }
 
 int32_t hid_to_generic(struct bt_data *bt_data, struct wireless_ctrl *ctrl_data) {
+    if (bt_data->base.pids->subtype == BT_SUBTYPE_XBOX_XINPUT &&
+        hid_parser_get_report(bt_data->base.pids->id, bt_data->base.report_id) == NULL) {
+        return xbox_xinput_to_generic(bt_data, ctrl_data);
+    }
 #ifdef CONFIG_BLUERETRO_GENERIC_HID_DEBUG
     struct hid_report *report = hid_parser_get_report(bt_data->base.pids->id, bt_data->base.report_id);
     for (uint32_t i = 0; i < report->usage_cnt; i++) {
@@ -784,7 +876,21 @@ bool hid_fb_from_generic(struct generic_fb *fb_data, struct bt_data *bt_data) {
 
     switch (fb_data->type) {
         case FB_TYPE_RUMBLE:
-            if (atomic_test_bit(&bt_data->base.flags[PAD], BT_QUIRK_8BITDO_GC)) {
+            if (bt_data->base.pids->subtype == BT_SUBTYPE_XBOX_XINPUT) {
+                struct generic_rumble *rumble = (struct generic_rumble *)bt_data->base.output;
+
+                rumble->report_id = 0x03;
+                rumble->report_size = 8;
+                rumble->state[0] = 0x0F;
+                rumble->state[1] = 0x00;
+                rumble->state[2] = 0x00;
+                rumble->state[3] = fb_data->state ? fb_data->hf_pwr : 0;
+                rumble->state[4] = fb_data->state ? fb_data->lf_pwr : 0;
+                rumble->state[5] = 0xFF;
+                rumble->state[6] = 0x00;
+                rumble->state[7] = 0xEB;
+            }
+            else if (atomic_test_bit(&bt_data->base.flags[PAD], BT_QUIRK_8BITDO_GC)) {
                 struct generic_rumble *rumble = (struct generic_rumble *)bt_data->base.output;
 
                 rumble->report_id = 0xA5;
@@ -902,4 +1008,3 @@ bool hid_fb_from_generic(struct generic_fb *fb_data, struct bt_data *bt_data) {
     }
     return ret;
 }
-

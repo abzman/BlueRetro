@@ -64,6 +64,7 @@ enum {
     BT_SW_N64,
     BT_SW_MD_GEN,
     BT_SW_HYPERKIN_ADMIRAL,
+    BT_SUBTYPE_XBOX_XINPUT,
     BT_SUBTYPE_MAX,
 };
 
@@ -616,4 +617,3 @@ static inline void bt_type_update(int32_t dev_id, int32_t type, uint32_t subtype
 }
 
 #endif /* _ADAPTER_H_ */
-

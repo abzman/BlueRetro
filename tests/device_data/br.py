@@ -37,6 +37,7 @@ class bt_subtype(IntEnum):
     SW_N64 = auto()
     SW_MD_GEN = auto()
     SW_HYPERKIN_ADMIRAL = auto()
+    XBOX_XINPUT = auto()
 
 
 class system(IntEnum):

@@ -4,6 +4,7 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -874,6 +875,7 @@ int32_t bt_host_get_next_accept_le_bdaddr(bt_addr_le_t *le_bdaddr) {
 void bt_host_bridge(struct bt_dev *device, uint8_t report_id, uint8_t *data, uint32_t len) {
     struct bt_data *bt_data = &bt_adapter.data[device->ids.id];
     uint32_t report_type = PAD;
+    uint32_t input_len = len;
 
     /* Reports are flowing, so this device is working. Every controller type
      * funnels through here, which is the one place the device is known
@@ -903,12 +905,24 @@ void bt_host_bridge(struct bt_dev *device, uint8_t report_id, uint8_t *data, uin
     if (device->ids.type == BT_HID_GENERIC) {
         struct hid_report *report = hid_parser_get_report(device->ids.id, report_id);
         if (report == NULL || report->type == REPORT_NONE) {
-            return;
+            /* Descriptor-less pad posing as an Xbox controller (GameSir Nova
+             * Lite 2): Xbox BT input layout, decoded in hid_generic.c */
+            if (report == NULL && device->name &&
+                strcmp(device->name->name, "Xbox Wireless Controller") == 0 &&
+                report_id == 1 && input_len == 15) {
+                device->ids.subtype = BT_SUBTYPE_XBOX_XINPUT;
+                bt_data->base.report_type = report_type = PAD;
+            }
+            else {
+                return;
+            }
         }
-        bt_data->base.report_type = report_type = report->type;
-        len = report->len;
-        if (report_id != bt_data->base.report_id) {
-            atomic_clear_bit(&bt_data->base.flags[report_type], BT_INIT);
+        else {
+            bt_data->base.report_type = report_type = report->type;
+            len = report->len;
+            if (report_id != bt_data->base.report_id) {
+                atomic_clear_bit(&bt_data->base.flags[report_type], BT_INIT);
+            }
         }
     }
     if (atomic_test_bit(&bt_data->base.flags[report_type], BT_INIT) || bt_data->base.report_cnt > 1) {
