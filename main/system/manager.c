@@ -29,6 +29,7 @@
 #include "system/led.h"
 #include "system/port_led.h"
 #include "bare_metal_app_cpu.h"
+#include "serial_cmd.h"
 #include "manager.h"
 
 /* GPIO matrix signal index for one LEDC channel.
@@ -525,6 +526,7 @@ static void sys_mgr_task(void *arg) {
 
     while (1) {
         boot_btn_hdl();
+        serial_cmd_poll();
 
         /* Fetch system cmd to execute */
         if (cmd_q_hdl) {

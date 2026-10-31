@@ -61,6 +61,7 @@ set(cov_srcs
     "bluetooth/hidp/steam.c"
     "bluetooth/hidp/pbp.c"
     "system/manager.c"
+    "system/serial_cmd.c"
     "tools/devcrypto.c"
     "tools/ps1_gameid.c"
 )
