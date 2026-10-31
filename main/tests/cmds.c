@@ -14,6 +14,7 @@
 #include "bluetooth/host.h"
 #include "bluetooth/hci.h"
 #include "bluetooth/hidp/hidp.h"
+#include "bluetooth/hidp/sw2.h"
 #include "coverage.h"
 #include "cmds.h"
 
@@ -30,6 +31,8 @@ enum {
     TESTS_CMDS_SYSTEM_ID,
     TESTS_CMDS_VID_PID,
     TESTS_CMDS_COV_DUMP,
+    TESTS_CMDS_ATT_NOTIFY,
+    TESTS_CMDS_FB,
 };
 
 static uint32_t log_offset = 0;
@@ -149,6 +152,32 @@ char *tests_cmds_hdlr(struct tests_cmds_pkt *pkt) {
 #ifdef CONFIG_BLUERETRO_COVERAGE
             cov_dump_info();
 #endif
+            break;
+        case TESTS_CMDS_ATT_NOTIFY:
+            /* An ATT notification, the way a BLE controller's answers and reports arrive:
+             * the ATT handle in the first two bytes, then the value. Routed as att_hid does. */
+            device = devices[pkt->handle];
+            if (device && pkt->data_len > 2) {
+                uint16_t att_handle = *(uint16_t *)pkt->data;
+                switch (device->ids.type) {
+                    case BT_SW2:
+                        bt_hid_sw2_hdlr(device, att_handle, &pkt->data[2], pkt->data_len - 2);
+                        break;
+                    default:
+                        printf("# %s: no notification path for type %ld\n", __FUNCTION__, device->ids.type);
+                        break;
+                }
+            }
+            break;
+        case TESTS_CMDS_FB:
+            /* Console feedback, as a wired driver queues it: the raw_fb header, then its data */
+            device = devices[pkt->handle];
+            if (device && pkt->data_len >= sizeof(struct raw_fb_header)) {
+                struct raw_fb fb_data = {0};
+
+                memcpy(&fb_data, pkt->data, MIN(pkt->data_len, sizeof(fb_data)));
+                adapter_bridge_fb(&fb_data, &bt_adapter.data[device->ids.id]);
+            }
             break;
         default:
             printf("# %s invalid cmd: 0x%02X\n", __FUNCTION__, pkt->cmd);
