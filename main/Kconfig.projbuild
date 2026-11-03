@@ -28,6 +28,17 @@ menu "BlueRetro"
             Bluetooth TX power and keep the radio quiet while the console
             boots.
 
+    config BLUERETRO_HW2_METHYLENEX
+        bool "Board variant: MethyleneX PS2 internal (OLED, touchpad UI, buzzer)"
+        depends on BLUERETRO_HW2 && BLUERETRO_SYSTEM_PSX_PS2
+        default n
+        help
+            MethyleneX PS2 internal board: 128x64 I2C OLED on IO17 (SCL) and
+            IO18 (SDA), buzzer on IO23, menus driven from a DualShock 4
+            touchpad, screensaver, and the MethyleneX settings over the BLE
+            config interface. IO17 is the OLED clock, so the status LED is
+            not mirrored there.
+
     config BLUERETRO_RETROSCALER_4LED
         bool "Enable RetroScaler 4 ports BT status LEDs"
         default n

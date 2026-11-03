@@ -41,9 +41,18 @@
 #define CFG_CMD_OPEN_DIR 0x12
 #define CFG_CMD_CLOSE_DIR 0x13
 #define CFG_CMD_DEL_FILE 0x14
+/* 0x15-0x17 are claimed by two board-specific tools that never share a
+ * build: MethyleneX (PS2) audio settings, and the WS2812 port LEDs
+ * (N64/GC). Each keeps the IDs its companion app already uses. */
+#ifdef CONFIG_BLUERETRO_HW2_METHYLENEX
+#define CFG_CMD_AUDIO_PREVIEW 0x15
+#define CFG_CMD_AUDIO_PREVIEW_STOP 0x16
+#define CFG_CMD_AUDIO_SETTINGS 0x17
+#else
 #define CFG_CMD_SET_PORT_LED_CFG 0x15
 #define CFG_CMD_SAVE_PORT_LED_CFG 0x16
 #define CFG_CMD_PORT_LED_IDENTIFY 0x17
+#endif
 #define CFG_CMD_SYS_DEEP_SLEEP 0x37
 #define CFG_CMD_SYS_RESET 0x38
 #define CFG_CMD_SYS_FACTORY 0x39
@@ -464,7 +473,7 @@ static void bt_att_cmd_read_group_rsp(uint16_t handle, uint16_t start, uint16_t 
     bt_att_cmd(handle, BT_ATT_OP_READ_GROUP_RSP, len);
 }
 
-static void bt_att_cfg_cmd_rd_hdlr(uint16_t handle) {
+static void bt_att_cfg_cmd_rd_hdlr(uint16_t handle, uint16_t attr_handle) {
     switch (cfg_cmd) {
         case CFG_CMD_GET_ABI_VER:
             bt_att_cfg_cmd_abi_ver_rsp(handle);
@@ -493,6 +502,11 @@ static void bt_att_cfg_cmd_rd_hdlr(uint16_t handle) {
         case CFG_CMD_GET_SYSTEM:
             bt_att_cfg_cmd_system_rsp(handle);
             break;
+#ifdef CONFIG_BLUERETRO_HW2_METHYLENEX
+        case CFG_CMD_AUDIO_SETTINGS:
+            bt_att_cmd_error_rsp(handle, BT_ATT_OP_READ_REQ, attr_handle, BT_ATT_ERR_UNLIKELY);
+            break;
+#endif
         default:
             printf("# Invalid read cfg cmd: %02X\n", cfg_cmd);
             bt_att_cfg_cmd_abi_ver_rsp(handle);
@@ -502,10 +516,40 @@ static void bt_att_cfg_cmd_rd_hdlr(uint16_t handle) {
 
 static void bt_att_cfg_cmd_wr_hdlr(struct bt_dev *device, uint8_t *data, uint32_t len) {
     uint32_t failed = 0;
+    if (len == 0) {
+        bt_att_cmd_error_rsp(device->acl_handle, BT_ATT_OP_WRITE_REQ, BR_CFG_CMD_CHRC_HDL, BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+        return;
+    }
 
     cfg_cmd = data[0];
 
     switch (cfg_cmd) {
+#ifdef CONFIG_BLUERETRO_HW2_METHYLENEX
+        case CFG_CMD_AUDIO_PREVIEW:
+            if (len != 2) {
+                bt_att_cmd_error_rsp(device->acl_handle, BT_ATT_OP_WRITE_REQ, BR_CFG_CMD_CHRC_HDL, BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+            }
+            else {
+                bt_att_cmd_error_rsp(device->acl_handle, BT_ATT_OP_WRITE_REQ, BR_CFG_CMD_CHRC_HDL, BT_ATT_ERR_UNLIKELY);
+            }
+            return;
+        case CFG_CMD_AUDIO_PREVIEW_STOP:
+            if (len != 1) {
+                bt_att_cmd_error_rsp(device->acl_handle, BT_ATT_OP_WRITE_REQ, BR_CFG_CMD_CHRC_HDL, BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+            }
+            else {
+                bt_att_cmd_error_rsp(device->acl_handle, BT_ATT_OP_WRITE_REQ, BR_CFG_CMD_CHRC_HDL, BT_ATT_ERR_UNLIKELY);
+            }
+            return;
+        case CFG_CMD_AUDIO_SETTINGS:
+            if (len != 1 && len != 9) {
+                bt_att_cmd_error_rsp(device->acl_handle, BT_ATT_OP_WRITE_REQ, BR_CFG_CMD_CHRC_HDL, BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+            }
+            else {
+                bt_att_cmd_error_rsp(device->acl_handle, BT_ATT_OP_WRITE_REQ, BR_CFG_CMD_CHRC_HDL, BT_ATT_ERR_UNLIKELY);
+            }
+            return;
+#endif
         case CFG_CMD_SET_DEFAULT_CFG:
         {
             char tmp_str[32] = "/fs/";
@@ -593,6 +637,7 @@ static void bt_att_cfg_cmd_wr_hdlr(struct bt_dev *device, uint8_t *data, uint32_
             remove(tmp_str);
             break;
         }
+#ifndef CONFIG_BLUERETRO_HW2_METHYLENEX
         case CFG_CMD_SET_PORT_LED_CFG:
             if (len == 1 + sizeof(struct port_led_cfg)) {
                 port_led_set_cfg((struct port_led_cfg *)&data[1]);
@@ -607,6 +652,7 @@ static void bt_att_cfg_cmd_wr_hdlr(struct bt_dev *device, uint8_t *data, uint32_
         case CFG_CMD_PORT_LED_IDENTIFY:
             port_led_identify();
             break;
+#endif
         default:
             break;
     }
@@ -733,7 +779,7 @@ void bt_att_cfg_hdlr(struct bt_dev *device, struct bt_hci_pkt *bt_hci_acl_pkt, u
                         bt_hci_le_conn_update(&le_conn_update);
                         atomic_set_bit(&device->flags, BT_DEV_PPCP_DONE);
                     }
-                    bt_att_cfg_cmd_rd_hdlr(device->acl_handle);
+                    bt_att_cfg_cmd_rd_hdlr(device->acl_handle, rd_req->handle);
                     break;
                 default:
                     bt_att_cmd_error_rsp(device->acl_handle, BT_ATT_OP_READ_REQ, rd_req->handle, BT_ATT_ERR_INVALID_HANDLE);
