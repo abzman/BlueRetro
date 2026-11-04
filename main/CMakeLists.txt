@@ -78,6 +78,7 @@ set(srcs
     "system/led.c"
     "system/port_led.c"
     "system/ui.c"
+    "system/mx_config.c"
     "system/ui_saver.c"
     "system/ui_gfx.c"
     "system/bare_metal_app_cpu.c"

@@ -149,6 +149,8 @@ static inline __attribute__((always_inline)) const struct kb_cfg *config_kb_cfg(
 static inline __attribute__((always_inline)) uint8_t config_kb_cfg_byte(uint32_t port) {
     return kb_cfg_byte(config_kb_cfg(port)) | ((kb_cfg_temp_mask & (1u << port)) ? KB_CFG_BYTE_UNTIL_OFF : 0);
 }
+/* Selected PS4/PS5 lightbar color. */
+uint32_t ps_ctrl_color_get(int32_t out_idx);
 
 void config_set_rst_bare_core(bool value);
 void hw_config_patch(void);
