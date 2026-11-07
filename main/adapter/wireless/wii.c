@@ -9,7 +9,11 @@
 #include "bluetooth/hidp/wii.h"
 #include "tests/cmds.h"
 #include "bluetooth/mon.h"
+#include "wii_ir.h"
 #include "wii.h"
+
+/* IR pointer: absolute position on LX/LY, relative motion on RX/RY */
+#define WII_IR_AXES_MAX 4
 
 #define WIIU_AXES_MAX 4
 #define NUNCHUCK_AXES_MAX 2
@@ -147,8 +151,26 @@ static const struct ctrl_meta wiiu_axes_meta[WIIU_AXES_MAX] =
     {.neutral = 0x800, .abs_max = 0x44C, .abs_min = 0x44C},
 };
 
+/* IR pointer values are centered on 0 already, see wii_ir.c.
+ * RX/RY are flagged relative so mouse outputs accumulate them,
+ * same as a HID mouse. */
+static const struct ctrl_meta wii_ir_axes_meta[WII_IR_AXES_MAX] =
+{
+    {.neutral = 0, .abs_max = 511, .abs_min = 512},
+    {.neutral = 0, .abs_max = 511, .abs_min = 512},
+    {.neutral = 0, .abs_max = WII_IR_DELTA_MAX, .abs_min = WII_IR_DELTA_MAX, .relative = 1},
+    {.neutral = 0, .abs_max = WII_IR_DELTA_MAX, .abs_min = WII_IR_DELTA_MAX, .relative = 1},
+};
+
+static struct wii_ir_ptr wii_ir_ptr[BT_MAX_DEV];
+
 static const uint32_t wii_mask[4] = {0x007F0F00, 0x00000000, 0x00000000, 0x00000000};
 static const uint32_t wii_desc[4] = {0x00000000, 0x00000000, 0x00000000, 0x00000000};
+/* Same as wii_mask + IR pointer (LX/LY absolute, RX/RY relative a.k.a.
+ * MOUSE_X/Y) + B/A as MOUSE_LEFT/MOUSE_RIGHT so the Wiimote works as a
+ * mouse with the default mapping. */
+static const uint32_t wii_ir_mask[4] = {0x117F0FFF, 0x00000000, 0x00000000, 0x00000000};
+static const uint32_t wii_ir_desc[4] = {0x000000FF, 0x00000000, 0x00000000, 0x00000000};
 static const uint32_t wiin_mask[4] = {0x13770F0F, 0x00000000, 0x00000000, 0x00000000};
 static const uint32_t wiin_desc[4] = {0x0000000F, 0x00000000, 0x00000000, 0x00000000};
 static const uint32_t wiic_mask[4] = {0xFFFFFFFF, 0x00000000, 0x00000000, 0x00000000};
@@ -232,8 +254,10 @@ static const uint32_t wiiu_btns_mask[32] = {
 static int32_t wiimote_to_generic(struct bt_data *bt_data, struct wireless_ctrl *ctrl_data) {
     uint16_t *buttons = (uint16_t *)bt_data->base.input;
 
-    TESTS_CMDS_LOG("\"wireless_input\": {\"report_id\": %ld, \"btns\": %u},\n",
-        bt_data->base.report_id, *buttons);
+    if (bt_data->base.report_id != BT_HIDP_WII_CORE_ACC_IR) {
+        TESTS_CMDS_LOG("\"wireless_input\": {\"report_id\": %ld, \"btns\": %u},\n",
+            bt_data->base.report_id, *buttons);
+    }
 
     memset((void *)ctrl_data, 0, sizeof(*ctrl_data));
 
@@ -244,6 +268,42 @@ static int32_t wiimote_to_generic(struct bt_data *bt_data, struct wireless_ctrl 
         if (*buttons & wii_btns_mask[i]) {
             ctrl_data->btns[0].value |= generic_btns_mask[i];
         }
+    }
+
+    if (bt_data->base.report_id == BT_HIDP_WII_CORE_ACC_IR) {
+        struct bt_hidp_wii_core_acc_ir *rpt = (struct bt_hidp_wii_core_acc_ir *)bt_data->base.input;
+        struct ctrl_meta *meta = bt_data->raw_src_mappings[PAD].meta;
+        struct wii_ir_ptr *ir = &wii_ir_ptr[bt_data->base.pids->id];
+        int32_t axes[WII_IR_AXES_MAX];
+
+        if (!atomic_test_bit(&bt_data->base.flags[PAD], BT_INIT)) {
+            memcpy(meta, wii_ir_axes_meta, sizeof(wii_ir_axes_meta));
+            wii_ir_ptr_init(ir);
+            atomic_set_bit(&bt_data->base.flags[PAD], BT_INIT);
+        }
+
+        wii_ir_ptr_update(ir, rpt->ir);
+        wii_ir_ptr_get(ir, &axes[AXIS_LX], &axes[AXIS_LY]);
+        wii_ir_ptr_delta(ir, &axes[AXIS_RX], &axes[AXIS_RY]);
+
+        /* Pointer pointing: trigger is the primary click */
+        if (*buttons & BIT(WII_CORE_B)) {
+            ctrl_data->btns[0].value |= BIT(MOUSE_LEFT);
+        }
+        if (*buttons & BIT(WII_CORE_A)) {
+            ctrl_data->btns[0].value |= BIT(MOUSE_RIGHT);
+        }
+
+        ctrl_data->mask = (uint32_t *)wii_ir_mask;
+        ctrl_data->desc = (uint32_t *)wii_ir_desc;
+
+        for (uint32_t i = 0; i < WII_IR_AXES_MAX; i++) {
+            ctrl_data->axes[i].meta = &meta[i];
+            ctrl_data->axes[i].value = axes[i];
+        }
+
+        TESTS_CMDS_LOG("\"wireless_input\": {\"report_id\": %ld, \"axes\": [%ld, %ld, %ld, %ld], \"ir_dots\": %lu, \"btns\": %u},\n",
+            bt_data->base.report_id, axes[0], axes[1], axes[2], axes[3], ir->visible, *buttons);
     }
 
     return 0;
