@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
 #include <freertos/FreeRTOS.h>
 #include <xtensa/hal.h>
 #include <esp_heap_caps.h>
@@ -22,6 +23,8 @@
 #include "wireless/wireless.h"
 #include "macro.h"
 #include "bluetooth/host.h"
+#include "adapter/wired/n64_runtime.h"
+#include "adapter/wired/n64.h"
 #include "tests/cmds.h"
 
 const uint32_t hat_to_ld_btns[16] = {
@@ -85,9 +88,23 @@ static uint32_t adapter_map_from_axis(struct map_cfg * map_cfg) {
 
         /* Check if the srv value sign match the src mapping sign */
         if (sign_check >= 0) {
-            /* Get proper abs_max base on sign and update max if current value is over */
+            /* The N64 mouse path: a relative source (a mouse) driving an N64 mouse. A mouse
+             * mapped to an N64 controller's stick keeps the scaling every other output uses. */
+            bool src_relative_n64 = false;
+            if (wired_adapter.system_id == N64 && ctrl_input->axes[src_axis_idx].meta->relative
+                    && map_cfg->dst_id < 4) {
+                int32_t dst_dev_mode = config.out_cfg[map_cfg->dst_id].dev_mode;
+#ifdef CONFIG_BLUERETRO_N64_AUTO_ID_SWITCHING
+                dst_dev_mode = n64_runtime_get_active_mode(map_cfg->dst_id, dst_dev_mode);
+#endif
+                src_relative_n64 = (dst_dev_mode == DEV_MOUSE);
+            }
             int32_t src_abs_max;
-            if (src_sign > 0) {
+            if (src_relative_n64) {
+                /* N64 mouse path: avoid per-axis normalization to keep isotropic scaling. */
+                src_abs_max = abs_src_value ? abs_src_value : 1;
+            }
+            else if (src_sign > 0) {
                 if (abs_src_value > ctrl_input->axes[src_axis_idx].meta->abs_max) {
                     ctrl_input->axes[src_axis_idx].meta->abs_max = abs_src_value;
                 }
@@ -106,12 +123,19 @@ static uint32_t adapter_map_from_axis(struct map_cfg * map_cfg) {
                 out->axes[dst_axis_idx].relative = ctrl_input->axes[src_axis_idx].meta->relative;
                 /* Dst is an axis */
                 int32_t deadzone = (int32_t)(((float)map_cfg->perc_deadzone / 10000) * src_abs_max) + ctrl_input->axes[src_axis_idx].meta->deadzone;
-                /* Check if axis over deadzone */
-                if (abs_src_value > deadzone) {
-                    int32_t value = abs_src_value - deadzone;
-                    int32_t dst_sign = btn_sign(out->axes[dst_axis_idx].meta->polarity, dst);
-                    int32_t dst_abs_max = (dst_sign > 0) ? out->axes[dst_axis_idx].meta->abs_max : out->axes[dst_axis_idx].meta->abs_min;
-                    float scale, fvalue;
+                if (src_relative_n64) {
+                    /* N64 mouse path: no deadzone for relative axes. */
+                    deadzone = 0;
+                }
+                /* Apply gain before deadzone so boosting keeps the usable range. */
+                int32_t dst_sign = btn_sign(out->axes[dst_axis_idx].meta->polarity, dst);
+                int32_t dst_abs_max = (dst_sign > 0) ? out->axes[dst_axis_idx].meta->abs_max : out->axes[dst_axis_idx].meta->abs_min;
+                float scale;
+                if (src_relative_n64) {
+                    /* N64 mouse path: isotropic gain only. */
+                    scale = ((float)map_cfg->perc_max) / 100.0f;
+                }
+                else {
                     switch (map_cfg->algo & 0xF) {
                         case LINEAR:
                             scale = ((float)dst_abs_max / (src_abs_max - deadzone)) * (((float)map_cfg->perc_max) / 100);
@@ -119,9 +143,35 @@ static uint32_t adapter_map_from_axis(struct map_cfg * map_cfg) {
                         default:
                             scale = ((float)map_cfg->perc_max) / 100;
                             break;
-
                     }
-                    fvalue = dst_sign * value * scale;
+                }
+
+                if (src_relative_n64) {
+                    /* N64 relative-mouse path: gain-then-deadzone (deadzone is 0 here), rounded,
+                       and always emit a minimal step so slow movement is not quantized away. */
+                    float scaled_value = abs_src_value * scale;
+                    float scaled_deadzone = deadzone * scale;
+
+                    if (scaled_value > scaled_deadzone) {
+                        float signed_val = dst_sign * (scaled_value - scaled_deadzone);
+                        int32_t value = (int32_t)lroundf(signed_val);
+
+                        if (abs_src_value > 0 && value == 0) {
+                            value = (signed_val >= 0.f) ? 1 : -1;
+                        }
+
+                        if (abs(value) > abs(out->axes[dst_axis_idx].value)) {
+                            out->axes[dst_axis_idx].value = value;
+                            out->axes[dst_axis_idx].cnt_mask = map_cfg->turbo;
+                        }
+                    }
+                }
+                else if (abs_src_value > deadzone) {
+                    /* Upstream arithmetic, bit-for-bit: subtract the deadzone in INTEGERS, scale
+                       once, truncate toward zero. Reassociating this in float (a*s - d*s) rounds
+                       three times instead of once and shifts results by +/-1 (208 -> 207.99998). */
+                    int32_t value = abs_src_value - deadzone;
+                    float fvalue = dst_sign * value * scale;
                     value = (int32_t)fvalue;
 
                     if (abs(value) > abs(out->axes[dst_axis_idx].value)) {
@@ -236,52 +286,56 @@ uint32_t adapter_get_out_mask(uint8_t dev_id) {
 }
 
 int32_t btn_id_to_axis(uint8_t btn_id) {
-    switch (btn_id) {
-        case PAD_LX_LEFT:
-        case PAD_LX_RIGHT:
-        case MOUSE_WX_LEFT:
-        case MOUSE_WX_RIGHT:
-            return AXIS_LX;
-        case PAD_LY_DOWN:
-        case PAD_LY_UP:
-        case MOUSE_WY_DOWN:
-        case MOUSE_WY_UP:
-            return AXIS_LY;
-        case PAD_RX_LEFT:
-        case PAD_RX_RIGHT:
-        //case MOUSE_X_LEFT:
-        //case MOUSE_X_RIGHT:
-            return AXIS_RX;
-        case PAD_RY_DOWN:
-        case PAD_RY_UP:
-        //case MOUSE_Y_DOWN:
-        //case MOUSE_Y_UP:
-            return AXIS_RY;
-        case PAD_LM:
-            return TRIG_L;
-        case PAD_RM:
-            return TRIG_R;
-        case PAD_LS:
-            return TRIG_LS;
-        case PAD_RS:
-            return TRIG_RS;
-        case PAD_LD_LEFT:
-            return DPAD_LEFT;
-        case PAD_LD_RIGHT:
-            return DPAD_RIGHT;
-        case PAD_LD_DOWN:
-            return DPAD_DOWN;
-        case PAD_LD_UP:
-            return DPAD_UP;
-        case PAD_RB_LEFT:
-            return BTN_LEFT;
-        case PAD_RB_RIGHT:
-            return BTN_RIGHT;
-        case PAD_RB_DOWN:
-            return BTN_DOWN;
-        case PAD_RB_UP:
-            return BTN_UP;
+    /* Use explicit comparisons to avoid enum value collisions between PAD_* and MOUSE_* ids. */
+    if (btn_id == PAD_LX_LEFT || btn_id == PAD_LX_RIGHT || btn_id == MOUSE_WX_LEFT || btn_id == MOUSE_WX_RIGHT) {
+        return AXIS_LX;
     }
+    if (btn_id == PAD_LY_DOWN || btn_id == PAD_LY_UP || btn_id == MOUSE_WY_DOWN || btn_id == MOUSE_WY_UP) {
+        return AXIS_LY;
+    }
+    if (btn_id == PAD_RX_LEFT || btn_id == PAD_RX_RIGHT || btn_id == MOUSE_X_LEFT || btn_id == MOUSE_X_RIGHT) {
+        return AXIS_RX;
+    }
+    if (btn_id == PAD_RY_DOWN || btn_id == PAD_RY_UP || btn_id == MOUSE_Y_DOWN || btn_id == MOUSE_Y_UP) {
+        return AXIS_RY;
+    }
+    if (btn_id == PAD_LM) {
+        return TRIG_L;
+    }
+    if (btn_id == PAD_RM) {
+        return TRIG_R;
+    }
+    if (btn_id == PAD_LS) {
+        return TRIG_LS;
+    }
+    if (btn_id == PAD_RS) {
+        return TRIG_RS;
+    }
+    if (btn_id == PAD_LD_LEFT) {
+        return DPAD_LEFT;
+    }
+    if (btn_id == PAD_LD_RIGHT) {
+        return DPAD_RIGHT;
+    }
+    if (btn_id == PAD_LD_DOWN) {
+        return DPAD_DOWN;
+    }
+    if (btn_id == PAD_LD_UP) {
+        return DPAD_UP;
+    }
+    if (btn_id == PAD_RB_LEFT) {
+        return BTN_LEFT;
+    }
+    if (btn_id == PAD_RB_RIGHT) {
+        return BTN_RIGHT;
+    }
+    if (btn_id == PAD_RB_DOWN) {
+        return BTN_DOWN;
+    }
+    if (btn_id == PAD_RB_UP) {
+        return BTN_UP;
+    }
+
     return AXIS_NONE;
 }
 
@@ -302,9 +356,9 @@ uint32_t axis_to_btn_mask(uint8_t axis) {
         case AXIS_LY:
             return BIT(PAD_LY_DOWN) | BIT(PAD_LY_UP) | BIT(MOUSE_WY_DOWN) | BIT(MOUSE_WY_UP);
         case AXIS_RX:
-            return BIT(PAD_RX_LEFT) | BIT(PAD_RX_RIGHT); /* BIT(MOUSE_X_LEFT) | BIT(MOUSE_X_RIGHT) */
+            return BIT(PAD_RX_LEFT) | BIT(PAD_RX_RIGHT) | BIT(MOUSE_X_LEFT) | BIT(MOUSE_X_RIGHT);
         case AXIS_RY:
-            return BIT(PAD_RY_DOWN) | BIT(PAD_RY_UP); /* BIT(MOUSE_Y_DOWN) | BIT(MOUSE_Y_UP) */
+            return BIT(PAD_RY_DOWN) | BIT(PAD_RY_UP) | BIT(MOUSE_Y_DOWN) | BIT(MOUSE_Y_UP);
         case TRIG_L:
             return BIT(PAD_LM);
         case TRIG_R:
@@ -372,45 +426,36 @@ uint32_t IRAM_ATTR axis_to_btn_id(uint8_t axis) {
 }
 
 int8_t btn_sign(uint32_t polarity, uint8_t btn_id) {
-    switch (btn_id) {
-        case PAD_LX_RIGHT:
-        case PAD_LY_UP:
-        case PAD_RX_RIGHT:
-        case PAD_RY_UP:
-        case PAD_LM:
-        case PAD_RM:
-        case MOUSE_WX_RIGHT:
-        case MOUSE_WY_UP:
-        //case MOUSE_X_RIGHT:
-        //case MOUSE_Y_UP:
-        case PAD_LS:
-        case PAD_RS:
-        case PAD_LD_LEFT:
-        case PAD_LD_RIGHT:
-        case PAD_LD_DOWN:
-        case PAD_LD_UP:
-        case PAD_RB_LEFT:
-        case PAD_RB_RIGHT:
-        case PAD_RB_DOWN:
-        case PAD_RB_UP:
-            return polarity ? -1 : 1;
-        case PAD_LX_LEFT:
-        case PAD_LY_DOWN:
-        case PAD_RY_DOWN:
-        case PAD_RX_LEFT:
-        case MOUSE_WX_LEFT:
-        case MOUSE_WY_DOWN:
-        //case MOUSE_X_LEFT:
-        //case MOUSE_Y_DOWN:
-            return polarity ? 1 : -1;
+    /* Explicit comparisons avoid enum-value collisions when distinguishing mouse vs pad directions. */
+    if (btn_id == PAD_LX_RIGHT || btn_id == PAD_LY_UP || btn_id == PAD_RX_RIGHT || btn_id == PAD_RY_UP ||
+        btn_id == PAD_LM || btn_id == PAD_RM || btn_id == MOUSE_WX_RIGHT || btn_id == MOUSE_WY_UP ||
+        btn_id == MOUSE_X_RIGHT || btn_id == MOUSE_Y_UP || btn_id == PAD_LS || btn_id == PAD_RS ||
+        btn_id == PAD_LD_LEFT || btn_id == PAD_LD_RIGHT || btn_id == PAD_LD_DOWN || btn_id == PAD_LD_UP ||
+        btn_id == PAD_RB_LEFT || btn_id == PAD_RB_RIGHT || btn_id == PAD_RB_DOWN || btn_id == PAD_RB_UP) {
+        return polarity ? -1 : 1;
     }
+
+    if (btn_id == PAD_LX_LEFT || btn_id == PAD_LY_DOWN || btn_id == PAD_RY_DOWN || btn_id == PAD_RX_LEFT ||
+        btn_id == MOUSE_WX_LEFT || btn_id == MOUSE_WY_DOWN || btn_id == MOUSE_X_LEFT || btn_id == MOUSE_Y_DOWN) {
+        return polarity ? 1 : -1;
+    }
+
     return 1;
 }
 
 void IRAM_ATTR adapter_init_buffer(uint8_t wired_id) {
     if (wired_adapter.system_id != WIRED_AUTO) {
+        int32_t dev_mode = config.out_cfg[wired_id].dev_mode;
+
+        /* For N64, runtime dev_mode is presence-driven (default PAD). */
+        if (wired_adapter.system_id == N64 && wired_id < 4) {
+#ifdef CONFIG_BLUERETRO_N64_AUTO_ID_SWITCHING
+            dev_mode = n64_runtime_get_active_mode(wired_id, dev_mode);
+#endif
+        }
+
         wired_adapter.data[wired_id].index = wired_id;
-        wired_init_buffer(config.out_cfg[wired_id].dev_mode, &wired_adapter.data[wired_id]);
+        wired_init_buffer(dev_mode, &wired_adapter.data[wired_id]);
     }
 }
 
@@ -433,6 +478,40 @@ void adapter_bridge(struct bt_data *bt_data) {
                 return;
             }
 
+            /*
+             * N64 DEV_KB expects raw keyboard scancodes.
+             * Do not apply user mapping tables (which may remap keys to PAD_*).
+             */
+            if (wired_adapter.system_id == N64) {
+                uint8_t out_idx = bt_data->base.pids->out_idx;
+                if (out_idx < 4) {
+                    int32_t dev_mode = config.out_cfg[out_idx].dev_mode;
+#ifdef CONFIG_BLUERETRO_N64_AUTO_ID_SWITCHING
+                    dev_mode = n64_runtime_get_active_mode(out_idx, dev_mode);
+#endif
+
+                    /* Ensure meta matches the runtime-selected dev_mode. */
+                    n64_apply_meta(dev_mode, &ctrl_output[out_idx]);
+
+                    if (dev_mode == DEV_KB) {
+                        struct wired_ctrl *out = &ctrl_output[out_idx];
+
+                        for (uint32_t w = 0; w < 4; w++) {
+                            out->btns[w].value = ctrl_input->btns[w].value;
+                            memset(out->btns[w].cnt_mask, 0, sizeof(out->btns[w].cnt_mask));
+                            out->map_mask[w] = ctrl_input->mask[w] & out->mask[w];
+                        }
+
+                        adapter_out_mask[out_idx] = out_mask = BIT(out_idx);
+
+                        out->index = out_idx;
+                        sys_macro_hdl(out, &bt_data->base.flags[PAD]);
+                        wired_from_generic(dev_mode, out, &wired_adapter.data[out_idx]);
+                        return;
+                    }
+                }
+            }
+
             adapter_out_mask[bt_data->base.pids->out_idx] =
                 out_mask = adapter_mapping(&config.in_cfg[bt_data->base.pids->out_idx]);
 
@@ -444,8 +523,17 @@ void adapter_bridge(struct bt_data *bt_data) {
             sys_macro_hdl(&ctrl_output[bt_data->base.pids->out_idx], &bt_data->base.flags[PAD]);
             for (uint32_t i = 0; out_mask; i++, out_mask >>= 1) {
                 if (out_mask & 0x1) {
+                    int32_t dev_mode = config.out_cfg[i].dev_mode;
+
+                    /* For N64, match output formatting to runtime dev_mode. */
+                    if (wired_adapter.system_id == N64 && i < 4) {
+#ifdef CONFIG_BLUERETRO_N64_AUTO_ID_SWITCHING
+                        dev_mode = n64_runtime_get_active_mode(i, dev_mode);
+#endif
+                    }
+
                     ctrl_output[i].index = i;
-                    wired_from_generic(config.out_cfg[i].dev_mode, &ctrl_output[i], &wired_adapter.data[i]);
+                    wired_from_generic(dev_mode, &ctrl_output[i], &wired_adapter.data[i]);
                 }
             }
         }

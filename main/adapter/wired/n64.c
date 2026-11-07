@@ -4,10 +4,13 @@
  */
 
 #include <string.h>
+#include <stdbool.h>
+#include <esp_timer.h>
 #include "zephyr/types.h"
 #include "tools/util.h"
 #include "adapter/adapter.h"
 #include "adapter/config.h"
+#include "adapter/mouse_mapper.h"
 #include "adapter/wired/wired.h"
 #include "adapter/wireless/wireless.h"
 #include "tests/cmds.h"
@@ -50,6 +53,30 @@ static DRAM_ATTR const struct ctrl_meta n64_mouse_axes_meta[N64_AXES_MAX] =
     {.size_min = -128, .size_max = 127, .neutral = 0x00, .abs_max = 0x7F, .abs_min = 0x80},
 };
 
+#ifndef CONFIG_BLUERETRO_N64_MOUSE_PTR_SENS
+#define CONFIG_BLUERETRO_N64_MOUSE_PTR_SENS 0.75f
+#endif
+
+#ifndef CONFIG_BLUERETRO_N64_MOUSE_PTR_ACCEL
+#define CONFIG_BLUERETRO_N64_MOUSE_PTR_ACCEL 1.05f
+#endif
+
+#ifndef CONFIG_BLUERETRO_N64_MOUSE_PTR_ACCEL_PCT
+#define CONFIG_BLUERETRO_N64_MOUSE_PTR_ACCEL_PCT 105
+#endif
+
+#ifndef CONFIG_BLUERETRO_N64_MOUSE_PTR_SMOOTH
+#define CONFIG_BLUERETRO_N64_MOUSE_PTR_SMOOTH 0.2f
+#endif
+
+#ifndef CONFIG_BLUERETRO_N64_MOUSE_PTR_MAX
+#define CONFIG_BLUERETRO_N64_MOUSE_PTR_MAX 127
+#endif
+
+#ifndef CONFIG_BLUERETRO_N64_MOUSE_PTR_POLL_US
+#define CONFIG_BLUERETRO_N64_MOUSE_PTR_POLL_US 16667 /* ~60Hz */
+#endif
+
 struct n64_map {
     uint16_t buttons;
     uint8_t axes[2];
@@ -65,6 +92,27 @@ struct n64_kb_map {
     uint16_t key_codes[3];
     uint8_t bitfield;
 } __packed;
+
+static struct mouse_mapper_cfg mouse_cfg[WIRED_MAX_DEV];
+static struct mouse_mapper_state mouse_state[WIRED_MAX_DEV];
+
+static inline void n64_mouse_mapper_load_cfg(uint8_t port) {
+    mouse_mapper_default_cfg(&mouse_cfg[port]);
+    mouse_cfg[port].pointer_mode = 1;
+    /* Map existing percent-based knob to pointer pipeline (1200% -> 1.2x). */
+    const float sens_percent = ((float)CONFIG_BLUERETRO_N64_MOUSE_SENS) / 1000.0f;
+    const float sens_percent_base = 1.2f;
+    mouse_cfg[port].sensitivity = CONFIG_BLUERETRO_N64_MOUSE_PTR_SENS * (sens_percent / sens_percent_base);
+    /* Allow dialing accel via percent knob; fallback to float default. */
+    mouse_cfg[port].accel = ((float)CONFIG_BLUERETRO_N64_MOUSE_PTR_ACCEL_PCT) / 100.0f;
+    if (mouse_cfg[port].accel < 1.0f) {
+        mouse_cfg[port].accel = CONFIG_BLUERETRO_N64_MOUSE_PTR_ACCEL;
+    }
+    mouse_cfg[port].smoothing_alpha = CONFIG_BLUERETRO_N64_MOUSE_PTR_SMOOTH;
+    mouse_cfg[port].max_per_frame = CONFIG_BLUERETRO_N64_MOUSE_PTR_MAX;
+    mouse_cfg[port].poll_interval_s = ((float)CONFIG_BLUERETRO_N64_MOUSE_PTR_POLL_US) / 1000000.0f;
+    mouse_mapper_init(&mouse_state[port], &mouse_cfg[port]);
+}
 
 static const uint32_t n64_mask[4] = {0x77DF0FFF, 0x00000000, 0x00000000, BR_COMBO_MASK};
 static const uint32_t n64_desc[4] = {0x0000000F, 0x00000000, 0x00000000, 0x00000000};
@@ -111,10 +159,13 @@ static const uint16_t n64_kb_scancode[KBM_MAX] = {
  /* KB_1, KB_2, KB_3, KB_4, KB_5, KB_6, KB_7, KB_8 */
     0x050C, 0x0505, 0x0506, 0x0507, 0x0508, 0x0509, 0x0609, 0x0608,
  /* KB_9, KB_0, KB_BACKSPACE, KB_TAB, KB_MINUS, KB_EQUAL, KB_LEFTBRACE, KB_RIGHTBRACE */
-    0x0607, 0x0606, 0x060D, 0x010D, 0x0605, 0x060C, 0x040C, 0x0604,
+     0x0607, 0x0606, 0x060D, 0x010D, 0x0410, 0x060C, 0x040C, 0x0604,
 
  /* KB_BACKSLASH, KB_SEMICOLON, KB_APOSTROPHE, KB_GRAVE, KB_COMMA, KB_DOT, KB_SLASH, KB_CAPSLOCK */
-    0x0410, 0x0307, 0x0306, 0x0405, 0x0209, 0x0208, 0x0207, 0x050F,
+    /* BACKSLASH: 0x0605, not 0x0410 — this fork's KB_MINUS (above) was moved onto 0x0410, so both
+     * keys sent the same scancode and '\'/'|' typed as '-'/'_'. 0x0605 is free here (it is upstream's
+     * minus slot); the pc64 ROM KMAP decodes its wire form 0x0506 -> '\'/'|'. */
+    0x0605, 0x0307, 0x0405, 0x050D, 0x0209, 0x0208, 0x0207, 0x050F,
  /* KB_F1, KB_F2, KB_F3, KB_F4, KB_F5, KB_F6, KB_F7, KB_F8 */
     0x010B, 0x010A, 0x080B, 0x070A, 0x070B, 0x020A, 0x020B, 0x030A,
  /* KB_F9, KB_F10, KB_F11, KB_F12, KB_PSCREEN, KB_SCROLL, KB_PAUSE, KB_INSERT */
@@ -146,6 +197,7 @@ void IRAM_ATTR n64_init_buffer(int32_t dev_mode, struct wired_data *wired_data) 
                 map->relative[i] = 1;
             }
             map->buttons = 0x0000;
+            n64_mouse_mapper_load_cfg(wired_data->index);
             break;
         }
         default:
@@ -162,29 +214,35 @@ void IRAM_ATTR n64_init_buffer(int32_t dev_mode, struct wired_data *wired_data) 
     }
 }
 
+void n64_apply_meta(int32_t dev_mode, struct wired_ctrl *ctrl_data) {
+    switch (dev_mode) {
+        case DEV_KB:
+            ctrl_data->mask = n64_kb_mask;
+            ctrl_data->desc = n64_kb_desc;
+            break;
+        case DEV_MOUSE:
+            ctrl_data->mask = n64_mouse_mask;
+            ctrl_data->desc = n64_mouse_desc;
+            for (uint32_t j = 0; j < N64_AXES_MAX; j++) {
+                ctrl_data->axes[j + 2].meta = &n64_mouse_axes_meta[j];
+            }
+            break;
+        case DEV_PAD:
+        default:
+            ctrl_data->mask = n64_mask;
+            ctrl_data->desc = n64_desc;
+            for (uint32_t j = 0; j < N64_AXES_MAX; j++) {
+                ctrl_data->axes[j].meta = &n64_axes_meta[j];
+            }
+            break;
+    }
+}
+
 void n64_meta_init(struct wired_ctrl *ctrl_data) {
     memset((void *)ctrl_data, 0, sizeof(*ctrl_data)*4);
 
     for (uint32_t i = 0; i < WIRED_MAX_DEV; i++) {
-        for (uint32_t j = 0; j < N64_AXES_MAX; j++) {
-            switch (config.out_cfg[i].dev_mode) {
-                case DEV_KB:
-                    ctrl_data[i].mask = n64_kb_mask;
-                    ctrl_data[i].desc = n64_kb_desc;
-                    break;
-                case DEV_MOUSE:
-                    ctrl_data[i].mask = n64_mouse_mask;
-                    ctrl_data[i].desc = n64_mouse_desc;
-                    ctrl_data[i].axes[j + 2].meta = &n64_mouse_axes_meta[j];
-                    break;
-                case DEV_PAD:
-                default:
-                    ctrl_data[i].mask = n64_mask;
-                    ctrl_data[i].desc = n64_desc;
-                    ctrl_data[i].axes[j].meta = &n64_axes_meta[j];
-                    break;
-            }
-        }
+        n64_apply_meta(config.out_cfg[i].dev_mode, &ctrl_data[i]);
     }
 }
 
@@ -281,6 +339,7 @@ static void n64_ctrl_from_generic(struct wired_ctrl *ctrl_data, struct wired_dat
 static void n64_mouse_from_generic(struct wired_ctrl *ctrl_data, struct wired_data *wired_data) {
     struct n64_mouse_map map_tmp;
     int32_t *raw_axes = (int32_t *)(wired_data->output + 4);
+    const uint8_t port = ctrl_data->index;
 
     memcpy((void *)&map_tmp, wired_data->output, sizeof(map_tmp));
 
@@ -295,15 +354,37 @@ static void n64_mouse_from_generic(struct wired_ctrl *ctrl_data, struct wired_da
         }
     }
 
-    for (uint32_t i = 2; i < 4; i++) {
-        if (ctrl_data->map_mask[0] & (axis_to_btn_mask(i) & n64_mouse_desc[0])) {
-            if (ctrl_data->axes[i].relative) {
-                map_tmp.relative[n64_axes_idx[i]] = 1;
-                atomic_add(&raw_axes[n64_axes_idx[i]], ctrl_data->axes[i].value);
-            }
-            else {
-                map_tmp.relative[n64_axes_idx[i]] = 0;
-                raw_axes[n64_axes_idx[i]] = ctrl_data->axes[i].value;
+    const bool map_rx = ctrl_data->map_mask[0] & (axis_to_btn_mask(AXIS_RX) & n64_mouse_desc[0]);
+    const bool map_ry = ctrl_data->map_mask[0] & (axis_to_btn_mask(AXIS_RY) & n64_mouse_desc[0]);
+    if ((ctrl_data->axes[AXIS_RX].relative || ctrl_data->axes[AXIS_RY].relative) && (map_rx || map_ry)) {
+        int32_t ox = 0;
+        int32_t oy = 0;
+        int32_t dx = map_rx ? ctrl_data->axes[AXIS_RX].value : 0;
+        int32_t dy = map_ry ? ctrl_data->axes[AXIS_RY].value : 0;
+
+        mouse_mapper_process(&mouse_cfg[port], &mouse_state[port], dx, dy, esp_timer_get_time(), &ox, &oy);
+
+        map_tmp.relative[0] = 1;
+        map_tmp.relative[1] = 1;
+
+        if (ox) {
+            atomic_add(&raw_axes[0], ox);
+        }
+        if (oy) {
+            atomic_add(&raw_axes[1], oy);
+        }
+    }
+    else {
+        for (uint32_t i = 2; i < 4; i++) {
+            if (ctrl_data->map_mask[0] & (axis_to_btn_mask(i) & n64_mouse_desc[0])) {
+                if (ctrl_data->axes[i].relative) {
+                    map_tmp.relative[n64_axes_idx[i]] = 1;
+                    atomic_add(&raw_axes[n64_axes_idx[i]], ctrl_data->axes[i].value);
+                }
+                else {
+                    map_tmp.relative[n64_axes_idx[i]] = 0;
+                    raw_axes[n64_axes_idx[i]] = ctrl_data->axes[i].value;
+                }
             }
         }
     }

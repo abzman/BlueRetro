@@ -18,6 +18,7 @@
 #include "adapter/config.h"
 #include "adapter/memory_card.h"
 #include "adapter/wired/n64.h"
+#include "adapter/wired/n64_runtime.h"
 #include "adapter/wired/gc.h"
 #include "system/gpio.h"
 #include "system/intr.h"
@@ -32,9 +33,9 @@
 #define N64_BIT_PERIOD_TICKS 8
 #define GC_BIT_PERIOD_TICKS 10
 
-#define N64_MOUSE 0x0002
-#define N64_CTRL 0x0005
-#define N64_KB 0x0200
+#define N64_MOUSE 0x0200
+#define N64_CTRL 0x0500
+#define N64_KB 0x0002
 
 #define N64_SLOT_EMPTY 0x02
 #define N64_SLOT_OCCUPY 0x01
@@ -113,6 +114,7 @@ static uint32_t gc_r_trig_prev_state[4] = {0};
 static inline void load_mouse_axes(uint8_t port, uint8_t *axes) {
     uint8_t *relative = (uint8_t *)(wired_adapter.data[port].output + 2);
     int32_t *raw_axes = (int32_t *)(wired_adapter.data[port].output + 4);
+    int8_t *axes_signed = (int8_t *)axes;
     int32_t val = 0;
 
     for (uint32_t i = 0; i < 2; i++) {
@@ -122,15 +124,15 @@ static inline void load_mouse_axes(uint8_t port, uint8_t *axes) {
         else {
             val = raw_axes[i];
         }
-
+        /* Pointer mapper already scales; just clamp to signed byte. */
         if (val > 127) {
-            axes[i] = 127;
+            axes_signed[i] = 127;
         }
-        else if (val < -128) {
-            axes[i] = -128;
+        else if (val < -127) {
+            axes_signed[i] = -127;
         }
         else {
-            axes[i] = (uint8_t)val;
+            axes_signed[i] = (int8_t)val;
         }
     }
 }
@@ -253,7 +255,8 @@ static void n64_kb_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
             break;
         default:
             /* 0x00 & 0xFF cmds goes here, corrupt cmd too! This help avoid ctrl detection error */
-            *(uint16_t *)buf = N64_KB;
+            const uint16_t id_be = sys_cpu_to_be16(N64_KB);
+            memcpy(buf, &id_be, sizeof(id_be));
             buf[2] = N64_SLOT_EMPTY;
 
             nsi_bytes_to_items_crc(channel * RMT_MEM_ITEM_NUM, buf, 3, &crc, STOP_BIT_2US);
@@ -279,7 +282,8 @@ static void n64_mouse_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
             break;
         default:
             /* 0x00 & 0xFF cmds goes here, corrupt cmd too! This help avoid ctrl detection error */
-            *(uint16_t *)buf = N64_MOUSE;
+            const uint16_t id_be = sys_cpu_to_be16(N64_MOUSE);
+            memcpy(buf, &id_be, sizeof(id_be));
             buf[2] = N64_SLOT_EMPTY;
 
             nsi_bytes_to_items_crc(channel * RMT_MEM_ITEM_NUM, buf, 3, &crc, STOP_BIT_2US);
@@ -377,7 +381,8 @@ static void n64_pad_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
             break;
         default:
             /* 0x00 & 0xFF cmds goes here, corrupt cmd too! This help avoid ctrl detection error */
-            *(uint16_t *)buf = N64_CTRL;
+            const uint16_t id_be = sys_cpu_to_be16(N64_CTRL);
+            memcpy(buf, &id_be, sizeof(id_be));
             if (config.out_cfg[channel].acc_mode > ACC_NONE && config.out_cfg[channel].acc_mode < ACC_BOTH) {
                 if (ctrl_acc_update[channel] > 1) {
                     buf[2] = N64_SLOT_EMPTY;
@@ -601,7 +606,15 @@ static unsigned n64_isr(unsigned cause) {
                     ctrl_acc_mode[channel] = config.out_cfg[channel].acc_mode;
                 }
 
-                switch (config.out_cfg[channel].dev_mode) {
+                uint8_t dev_mode = config.out_cfg[channel].dev_mode;
+                if (wired_adapter.system_id == N64 && channel < 4) {
+#ifdef CONFIG_BLUERETRO_N64_AUTO_ID_SWITCHING
+                    n64_runtime_on_identify_cmd(channel, buf[0]);
+                    dev_mode = (uint8_t)n64_runtime_get_active_mode(channel, dev_mode);
+#endif
+                }
+
+                switch (dev_mode) {
                     case DEV_KB:
                         n64_kb_cmd_hdlr(channel, channel, item);
                         break;

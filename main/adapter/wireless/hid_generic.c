@@ -424,6 +424,7 @@ static void hid_mouse_to_generic(struct bt_data *bt_data, struct wireless_ctrl *
             }
         }
     }
+
 }
 
 static void hid_pad_init(struct hid_report_meta *meta, struct hid_report *report, struct raw_src_mapping *map) {

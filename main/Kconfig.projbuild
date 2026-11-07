@@ -138,6 +138,44 @@ menu "BlueRetro"
             ESP-driven OE on IO2/IO27, hold-style POWER_ON, swapped
             P1/P2 sense, LED overlay {15, 4, 15, 4}.
 
+    config BLUERETRO_N64_AUTO_ID_SWITCHING
+        bool "N64: auto device identity switching"
+        default n
+        help
+            When enabled, each N64 port reports the Joybus device type (controller/keyboard/
+            mouse) of the Bluetooth device actually connected to it, instead of the
+            configured output mode (config.out_cfg[].dev_mode), which is still used while
+            nothing is connected.
+
+            Off by default: with it on, a keyboard on a port left in the default gamepad
+            mode becomes a RANDnet keyboard, which retail games without keyboard support
+            ignore, and a gamepad set to drive the N64 mouse becomes a controller again.
+
+            For compatibility, the active device type only changes at an identify/reset
+            boundary (Joybus command 0x00 / 0xFF).
+
+            Disable this if you want BlueRetro to always use the configured output device
+            type (config.out_cfg[].dev_mode) and never switch dynamically.
+
+    config BLUERETRO_N64_MOUSE_SENS
+        int "N64 mouse sensitivity (percent)"
+        range 1 30000
+        default 300
+        help
+            Multiplier for N64 mouse relative movement, expressed in percent.
+            100 means 1.0x (no change), 200 doubles the speed. Applies symmetrically
+            to both axes after accumulation and before clamping. Values above 800 are
+            allowed for very high gain (e.g., 24000 = 240x) but may saturate quickly.
+
+    config BLUERETRO_N64_MOUSE_PTR_ACCEL_PCT
+        int "N64 mouse pointer acceleration (percent)"
+        range 50 300
+        default 50
+        help
+            Soft acceleration exponent for N64 mouse pointer mode, expressed in percent.
+            100 = linear (no accel), 105 = powf(speed, 1.05). Lower this to reduce
+            aggressive acceleration, increase to make fast motions ramp harder.
+
     menu "Debug"
 
         config BLUERETRO_QEMU
