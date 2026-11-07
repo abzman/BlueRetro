@@ -123,6 +123,48 @@ over the pad protocol. Guns that rely on the console sampling the light
 sensor against the beam (Zapper, Super Scope, Menacer, Justifier, ...) need
 console-side timing and are not covered.
 
+## N64 keyboard and commands
+
+From bherdm/BlueRetroForever. Set an N64 output to **Keyboard** mode and a
+Bluetooth keyboard on it is a RANDnet keyboard: games and homebrew get the
+RND-001 read (0x13), and libdragon gets an extended read (0x2A) carrying up
+to ten held keys as HID usages, media and system keys, and Apple's Fn. The
+console's lock LEDs are sent back to the keyboard. Design notes are in
+[`docs/keyboard-design.md`](docs/keyboard-design.md) and
+[`docs/classic-keyboard-design.md`](docs/classic-keyboard-design.md).
+
+Each port has keyboard settings, saved with the config (config version 4;
+flashing an older firmware back resets the config to defaults):
+
+* **Mode:** full layout (every key by position, both reads) or classic
+  (an RND-001 for retail software: 0x13 only, characters translated from
+  the layout).
+* **Layout:** US, UK, DE, FR or JP. **Arrangement:** Mac or PC.
+
+They are set over the USB serial port (`kb <1-4> <full|classic>
+<us|uk|de|fr|jp> <mac|pc>`), from the BLE output config (5 bytes instead of
+2; an app writing 2 bytes leaves them alone), or by an N64 program. The
+serial port also takes `inq start`, `inq stop`, `disconnect`, `status` and
+`help`.
+
+N64 programs can send BlueRetroForever's command **0x7B** on any port in any
+mode to read the status block (pairing, what is connected on each port),
+open or close pairing, disconnect a port, and read or set the keyboard
+settings. See [`docs/n64-commands-design.md`](docs/n64-commands-design.md)
+and the test ROM in `tests/n64_console_cmd/`.
+
+Differences from BlueRetroForever:
+
+* **Auto device identity switching is off by default**
+  (`CONFIG_BLUERETRO_N64_AUTO_ID_SWITCHING`). With it on, each port reports
+  the type of the device actually connected, so a keyboard on a port left in
+  the default gamepad mode turns into a RANDnet keyboard, which retail games
+  ignore. Turn it on in menuconfig if you want that.
+* **No LED level.** The Bluetooth LED keeps upstream's pulse; the 0x7B LED
+  level verb answers "unknown verb" and the status block's LED level is 0.
+* **The BLE config command for the console system is 0x09** (0x08 in
+  BlueRetroForever), since 0x08 reads the port LED config here.
+
 ## Absorbed from other forks
 
 Fixes and features picked from other forks of BlueRetro, with their original
@@ -131,7 +173,7 @@ any change made while porting it to ESP-IDF 6.1.
 
 | From | What |
 |---|---|
-| [bherdm/BlueRetroForever](https://github.com/bherdm/BlueRetroForever) | Cancel an LE connect the peer never answers, retry a failed SW2 SPI read, ignore unrequested SET_LED / pairing acks, disconnect logging; OTA: writes without response (~3x faster updates), errors for a rejected image, full firmware name/version reads; disconnect every peer (config interface included) before restart / sleep; QEMU heap fix |
+| [bherdm/BlueRetroForever](https://github.com/bherdm/BlueRetroForever) | Cancel an LE connect the peer never answers, retry a failed SW2 SPI read, ignore unrequested SET_LED / pairing acks, disconnect logging; OTA: writes without response (~3x faster updates), errors for a rejected image, full firmware name/version reads; disconnect every peer (config interface included) before restart / sleep; QEMU heap fix; N64: RANDnet keyboard with both reads (0x13 and libdragon's extended 0x2A), media/system keys, lock LEDs back to the Bluetooth keyboard, per-port layout (US/UK/DE/FR/JP, Mac/PC) and classic RND-001 mode, ISO/JIS keys, commands from N64 programs (0x7B: pairing, status, disconnect, keyboard settings), per-port device identity (optional auto switching), N64 mouse acceleration; pairing / status / disconnect / keyboard settings over the USB serial port |
 | [tassiolucas/BlueRetro](https://github.com/tassiolucas/BlueRetro) | DS4 clones that refuse HID until the link is encrypted (QRD Spark N5, Maestro S3, Fantech Nova II...) |
 | [azediawan/BlueRetro](https://github.com/azediawan/BlueRetro) | Log refused L2CAP connections |
 | [rpf16rj/BlueRetro](https://github.com/rpf16rj/BlueRetro) | DualSense accurate haptics (vibration v2); PS1/PS2 rumble queued on every poll again |
@@ -141,6 +183,11 @@ any change made while porting it to ESP-IDF 6.1.
 | [Scyllinice/BlueRetro](https://github.com/Scyllinice/BlueRetro) | Genesis: level-driven 3/6-button pad emulation (fixes dropped inputs and C/Start flicker with fast readers) |
 | [DoomyDoomer/BlueRetro](https://github.com/DoomyDoomer/BlueRetro) | SNES: count clocked bits with PCNT and only apply commands of a sane length (darthcloud's post-archive work) |
 | [Modac/BlueRetro](https://github.com/Modac/BlueRetro) | WS2812 per-port status LEDs on N64/GC (off by default, configured over the BLE config interface) |
+| [andrew171717/BlueRetro-PokeBall-Plus](https://github.com/andrew171717/BlueRetro-PokeBall-Plus) | Poké Ball Plus over BLE |
+| [loneshxdow/BlueRetro](https://github.com/loneshxdow/BlueRetro) | GameSir Nova Lite 2 (descriptor-less Xbox layout) with rumble |
+| [adamhleslie/BlueRetro](https://github.com/adamhleslie/BlueRetro) | SInput gamepads over Bluetooth (handled as generic HID, SDP first) |
+| [eaudunord/BlueRetro](https://github.com/eaudunord/BlueRetro) | Saturn: Mission Stick and Arcade Racer emulation, keyboard lock keys and scancode fixes, mouse/keyboard behind the multitap; Genesis: XBAND keyboard |
+| [RobertDaleSmith/BlueRetro](https://github.com/RobertDaleSmith/BlueRetro) | 3DO: the arcade SILLY_CONTROL_PAD (coin/start/service, used by Orbatak) on the Keyboard mode |
 
 ### Looked at and not taken yet
 
@@ -228,6 +275,39 @@ picked up later once the reason below is resolved.
   factory-reset N64 setup would default to a Rumble Pak instead of no
   accessory, and other systems would change too. If rumble by default is
   wanted, it should be decided per system.
+
+#### 5. bherdm/BlueRetroForever: the Bluetooth LED rework
+
+* Repo: [bherdm/BlueRetroForever](https://github.com/bherdm/BlueRetroForever), branch `main`
+* Commit: [`4a7bf8e`](https://github.com/bherdm/BlueRetroForever/commit/4a7bf8ec3b0e86e654936418bc2e8602898d5a88)
+  "The Bluetooth LED at a saved level, without PWM, and led <1-5> on the serial port"
+* What it does: drops the LED's PWM. Pairing blinks at 1 Hz, an error is
+  solid, and the brightness is a saved level, by default the pin's pull-up
+  alone (a faint glow). Adds `led <1-5>` on the serial port and the 0x7B LED
+  level verb, and a new `hw_config` field.
+* Why not now: it changes how the LED looks on every board, by default, for
+  a dimming feature only some boards need. Only its linker change (the LED
+  code runs from flash, which frees IRAM) is included. To take the rest,
+  keep upstream's pulse as the default and make the new levels opt-in.
+
+#### 6. eaudunord/BlueRetro: Saturn default remap and global trigger change
+
+* Repo: [eaudunord/BlueRetro](https://github.com/eaudunord/BlueRetro), branch `saturn-keyboard-standard-map`
+* Commits: [`5592b2a`](https://github.com/eaudunord/BlueRetro/commit/5592b2a40192c52b8a7a6cfed3b911471a877504)
+  and [`520d5b8`](https://github.com/eaudunord/BlueRetro/commit/520d5b88ae92fc90eb3139021a82ca5f8cfb7036)
+  (the rest of both is included)
+* What was left out: moving Saturn L/R to other source buttons and widening
+  every Saturn pad's mask, a default Xbox-to-Saturn button remap in
+  `config.c`, a config patch that forced keyboard + mouse on Saturn multitap
+  pairs and rewrote their mouse mapping on every load, and a change to
+  `adapter_map_from_axis()` that treats trigger axes differently on every
+  system.
+* Why not now: each changes defaults or mappings for existing users (the
+  last for every console), not only for the new devices. They can come back
+  as opt-in settings.
+
+Also checked: coolbho3k's DualSense adaptive-trigger effects are already in
+this tree from upstream, so there was nothing to take.
 
 ## Switch 2 controller support
 
