@@ -29,6 +29,7 @@ set(cov_srcs
     "adapter/wireless/hid_generic.c"
     "adapter/wireless/ps3.c"
     "adapter/wireless/wii.c"
+    "adapter/wireless/wii_ir.c"
     "adapter/wireless/ps.c"
     "adapter/wireless/sw.c"
     "adapter/wireless/sw2.c"
