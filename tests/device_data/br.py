@@ -18,6 +18,9 @@ class bt_type(IntEnum):
     PS = auto()
     SW = auto()
     SW2 = auto()
+    STEAM = auto()
+    PBP = auto()
+    SINPUT = auto()
 
 
 class bt_subtype(IntEnum):
