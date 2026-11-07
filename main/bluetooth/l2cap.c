@@ -244,6 +244,10 @@ void bt_l2cap_sig_hdlr(struct bt_dev *device, struct bt_hci_pkt *bt_hci_acl_pkt)
                 atomic_set_bit(&device->flags, BT_DEV_HID_CTRL_SEC_RETRY);
                 bt_hci_set_conn_encrypt(device);
             }
+            else if (conn_rsp->result != BT_L2CAP_BR_SUCCESS && conn_rsp->result != BT_L2CAP_BR_PENDING) {
+                printf("# dev: %ld conn refused scid: 0x%04X result: 0x%04X status: 0x%04X\n",
+                    device->ids.id, conn_rsp->scid, conn_rsp->result, conn_rsp->status);
+            }
             break;
         }
         case BT_L2CAP_CONF_REQ:
