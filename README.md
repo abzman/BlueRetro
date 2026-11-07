@@ -81,11 +81,41 @@ Not carried by any of those forks:
 * **Key-derivation instrumentation** for the pairing exchange, and a cross-check
   of the advertised product ID against the one read from SPI flash.
 
+**Wiimote as a pointing device.** The Wiimote's IR camera now drives
+pointer outputs. See [Wiimote pointer](#wiimote-pointer) below.
+
 ## About BlueRetro
 
 <p align="center"><img src="/static/PNGs/BRE_Logo_Color_Outline.png" width="600"/></p>
 <br>
 <p align="justify">BlueRetro is a multiplayer Bluetooth controllers adapter for various retro game consoles & computers. Lost or broken controllers? Reproduction too expensive? Need those rare and obscure accessories? Just use the Bluetooth devices you already got! The project is open source hardware & software under the CERN-OHL-P-2.0 & Apache-2.0 licenses respectively. It's built for the popular ESP32 chip. Wii, Switch, PS3, PS4, PS5, Xbox One, Xbox Series X|S & generic HID Bluetooth (BR/EDR & LE) devices are supported. Parallel 1P (Computers, NeoGeo, Supergun, JAMMA, Handheld, etc), Parallel 2P (Atari 2600/7800, Master System, Computers, etc), NES, PCE / TG16, Mega Drive / Genesis, SNES, CD-i, 3DO, Jaguar, Saturn, PSX, PC-FX, JVS (Arcade), Virtual Boy, N64, Dreamcast, PS2, GameCube & Wii extension are supported with simultaneous 4+ players using a single adapter.</p>
+
+## Wiimote pointer
+
+A bare Wiimote (no extension) aimed at a Wii sensor bar can act as a
+pointing device. The IR camera is only switched on when the output the
+Wiimote is mapped to uses a pointer, so it costs no battery otherwise.
+
+| Output (web config mode) | What the Wiimote emulates | Buttons |
+|---|---|---|
+| **Mouse** on any system with mouse support (SNES, PS1/PS2, N64, Saturn, Genesis, Dreamcast, PCE, PC-FX, 3DO, CD-i, ...) | Mouse: aiming moves the cursor | B = left click, A = right click |
+| **GamePad Alt** on CD-i | Absolute coordinate device (Peacekeeper light gun) | B / 1 = button 1, A / 2 = button 2 |
+
+Tips:
+
+* For absolute outputs (CD-i GamePad Alt), set the deadzone of the left stick
+  X/Y mappings to 0 % in the advanced mapping config, otherwise the pointer
+  sticks around screen center. Then run the game's own gun calibration.
+* Mouse speed follows the mapping's scale (max %) of the right stick X/Y.
+* If vertical aim is inverted on your setup, swap the Y up/down mapping.
+* With a Nunchuk or other extension plugged in, the Wiimote behaves as
+  before and the camera stays off.
+
+Adding another absolute pointing device (e.g. a tablet or touch screen
+protocol) only needs the system to advertise `WIRED_PTR_ABS` for its mode
+in `wired_ptr_caps()` (`main/adapter/wired/wired.c`) and to read the
+absolute position from the LX/LY axes. CRT-timed light guns (Zapper,
+Menacer, GunCon, ...) are a different problem and are not covered.
 
 ## Switch 2 controller support
 
