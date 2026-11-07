@@ -6,7 +6,10 @@
 #include <nvs.h>
 #include <nvs_flash.h>
 
+#include "sdkconfig.h"
 #include "mx_config.h"
+
+#ifdef CONFIG_BLUERETRO_HW2_METHYLENEX
 
 #define MX_NVS_NS "mx_cfg"
 
@@ -375,3 +378,28 @@ void mx_cfg_set_time(const struct mx_time_cfg *t)
         time_cfg = *t;
     }
 }
+
+#else /* !CONFIG_BLUERETRO_HW2_METHYLENEX */
+
+/* MethyleneX settings only exist on that board: nothing is stored and the
+ * BLE characteristics refuse every access. */
+static const struct mx_audio_cfg mx_audio_none;
+static const struct mx_oled_cfg mx_oled_none;
+static const struct mx_led_cfg mx_led_none;
+static const struct mx_idle_cfg mx_idle_none;
+static const struct mx_time_cfg mx_time_none;
+static const struct mx_features_cfg mx_features_none;
+
+void mx_config_init(void) {}
+void mx_config_select_slot(uint8_t slot) { (void)slot; }
+uint32_t mx_config_read_blob(uint8_t *dst, uint32_t max) { (void)dst; (void)max; return 0; }
+int32_t mx_config_write_blob(const uint8_t *src, uint32_t len) { (void)src; (void)len; return -1; }
+const struct mx_audio_cfg *mx_cfg_audio(void) { return &mx_audio_none; }
+const struct mx_oled_cfg *mx_cfg_oled(void) { return &mx_oled_none; }
+const struct mx_led_cfg *mx_cfg_led(void) { return &mx_led_none; }
+const struct mx_idle_cfg *mx_cfg_idle(void) { return &mx_idle_none; }
+const struct mx_time_cfg *mx_cfg_time(void) { return &mx_time_none; }
+const struct mx_features_cfg *mx_cfg_features(void) { return &mx_features_none; }
+void mx_cfg_set_time(const struct mx_time_cfg *t) { (void)t; }
+
+#endif /* CONFIG_BLUERETRO_HW2_METHYLENEX */

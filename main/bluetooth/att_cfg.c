@@ -97,12 +97,23 @@ enum {
     BR_MC_DATA_CHRC_HDL,
     BR_BD_ADDR_ATT_HDL,
     BR_BD_ADDR_CHRC_HDL, /* Deprecated, use BR_CFG_CMD_CHRC_HDL */
+#ifdef CONFIG_BLUERETRO_HW2_METHYLENEX
     BR_MX_CFG_CTRL_ATT_HDL,
     BR_MX_CFG_CTRL_CHRC_HDL,
     BR_MX_CFG_DATA_ATT_HDL,
     BR_MX_CFG_DATA_CHRC_HDL,
     LAST_HDL = BR_MX_CFG_DATA_CHRC_HDL,
     MAX_HDL,
+#else
+    LAST_HDL = BR_BD_ADDR_CHRC_HDL,
+    MAX_HDL,
+    /* Not in the service on other boards: past LAST_HDL so never discovered,
+     * and mx_config.c is stubbed if a client writes them anyway. */
+    BR_MX_CFG_CTRL_ATT_HDL,
+    BR_MX_CFG_CTRL_CHRC_HDL,
+    BR_MX_CFG_DATA_ATT_HDL,
+    BR_MX_CFG_DATA_CHRC_HDL,
+#endif
 };
 
 static uint8_t br_grp_base_uuid[] = {0x00, 0x9a, 0x79, 0x76, 0xa1, 0x2f, 0x4b, 0x31, 0xb0, 0xfa, 0x80, 0x51, 0x56, 0x0f, 0x83, 0x56};

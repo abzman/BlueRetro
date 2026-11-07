@@ -112,7 +112,9 @@ static void wl_init_task(void *arg) {
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+#ifdef CONFIG_BLUERETRO_HW2_METHYLENEX
     mx_config_init();
+#endif
 
     config_init(DEFAULT_CFG);
 
