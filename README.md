@@ -165,6 +165,22 @@ Differences from BlueRetroForever:
 * **The BLE config command for the console system is 0x09** (0x08 in
   BlueRetroForever), since 0x08 reads the port LED config here.
 
+## Board builds
+
+Builds for specific adapters and internal boards, each a config in `configs/`
+built by CI next to the regular ones. They only change anything on their own
+builds; the regular hw1 / hw2 firmware is unaffected.
+
+| Board | Config | Notes |
+|---|---|---|
+| AliExpress **iBlueControlMod** GameCube internal board (V1.1) | `hw2/gamecube_ibluecontrolmod`, `hw2/gamecube_ibluecontrolmod_safe` | Flashable over Bluetooth from the stock firmware at blueretro.io/ota.html. Rumble on by default, reset button and sleep mode. The `_safe` build lowers the Bluetooth TX power and keeps the radio quiet for 20 s after boot, for boards whose 3.3 V supply browns out. Full guide: [`tools/ibluecontrolmod/README.md`](tools/ibluecontrolmod/README.md) ([Deutsch](tools/ibluecontrolmod/README.de.md)). |
+| **RetroScaler** 4-port adapters (N64, Dreamcast, GameCube) | `hw1/n64_retroscaler`, `hw1/dreamcast_retroscaler`, `hw1/gamecube_retroscaler` | Drives the four BT status LEDs. Rumble is the default accessory (Dreamcast: Jump Pack, plus the VMU on port 1), written once into an existing config so no reset from the web config is needed; other settings and mappings are kept. |
+| **RetroScaler** single-port adapters | `hw1/{3do,genesis,nes,parallel_1p,parallel_2p,playstation,saturn,snes}_retroscaler` | Reconstructed from the vendor's binaries. |
+| **MethyleneX** PS2 internal board | `hw2/playstation_methylenex` | 128x64 OLED menus navigated with a DualShock 4 touchpad, screensaver, buzzer, and the board's settings over the BLE config interface. Its BLE commands 0x15 to 0x17 exist only on this build (other builds use those IDs for the port LEDs). |
+
+ESP32-MINI based adapters need no config of their own: the Bluetooth LED pin
+is picked from the chip package.
+
 ## Absorbed from other forks
 
 Fixes and features picked from other forks of BlueRetro, with their original
@@ -181,13 +197,16 @@ any change made while porting it to ESP-IDF 6.1.
 | [jjtcm/BlueRetro](https://github.com/jjtcm/BlueRetro) | LE Secure Connections pairing (ported to PSA Crypto, used only when a peer refuses legacy pairing); 2026 Steam Controller (Triton) over BLE; `tools/br_trace.py` HCI trace decoder; sturdier memory card debug reads |
 | [arcticlula/BlueRetro-PS2-Multitap](https://github.com/arcticlula/BlueRetro-PS2-Multitap) | PS2 multitap on port 1 with Multitap = Alt (slot lines on GPIO 18/23 from an sd2psx helper, or inferred from poll order) |
 | [Scyllinice/BlueRetro](https://github.com/Scyllinice/BlueRetro) | Genesis: level-driven 3/6-button pad emulation (fixes dropped inputs and C/Start flicker with fast readers) |
-| [DoomyDoomer/BlueRetro](https://github.com/DoomyDoomer/BlueRetro) | SNES: count clocked bits with PCNT and only apply commands of a sane length (darthcloud's post-archive work) |
+| [DoomyDoomer/BlueRetro](https://github.com/DoomyDoomer/BlueRetro) | SNES: count clocked bits with PCNT and only apply commands of a sane length (darthcloud's post-archive work); Bluetooth LED pin on ESP32-MINI modules (Humble Bazooka's change) |
 | [Modac/BlueRetro](https://github.com/Modac/BlueRetro) | WS2812 per-port status LEDs on N64/GC (off by default, configured over the BLE config interface) |
 | [andrew171717/BlueRetro-PokeBall-Plus](https://github.com/andrew171717/BlueRetro-PokeBall-Plus) | Poké Ball Plus over BLE |
 | [loneshxdow/BlueRetro](https://github.com/loneshxdow/BlueRetro) | GameSir Nova Lite 2 (descriptor-less Xbox layout) with rumble |
 | [adamhleslie/BlueRetro](https://github.com/adamhleslie/BlueRetro) | SInput gamepads over Bluetooth (handled as generic HID, SDP first) |
 | [eaudunord/BlueRetro](https://github.com/eaudunord/BlueRetro) | Saturn: Mission Stick and Arcade Racer emulation, keyboard lock keys and scancode fixes, mouse/keyboard behind the multitap; Genesis: XBAND keyboard |
 | [RobertDaleSmith/BlueRetro](https://github.com/RobertDaleSmith/BlueRetro) | 3DO: the arcade SILLY_CONTROL_PAD (coin/start/service, used by Orbatak) on the Keyboard mode |
+| [konsolenschatz/BlueRetro-iBlueControlMod](https://github.com/konsolenschatz/BlueRetro-iBlueControlMod) | AliExpress iBlueControlMod GameCube internal board (V1.1), with an English / German guide |
+| [opssemnik/Blueretro-for-retroscaler-4port-1port](https://github.com/opssemnik/Blueretro-for-retroscaler-4port-1port) | RetroScaler adapters: 4-port N64 / Dreamcast / GameCube with their BT status LEDs, single-port configs, per-port accessory defaults |
+| [akbkarimi/BlueRetro](https://github.com/akbkarimi/BlueRetro) | MethyleneX PS2 internal board: OLED menus driven from a DualShock 4 touchpad, screensaver, buzzer, settings over BLE |
 
 ### Looked at and not taken yet
 
@@ -308,6 +327,16 @@ picked up later once the reason below is resolved.
 
 Also checked: coolbho3k's DualSense adaptive-trigger effects are already in
 this tree from upstream, so there was nothing to take.
+
+Board forks not taken because the boards above already cover them:
+[dclstn/blueretro-iblue-gc](https://github.com/dclstn/blueretro-iblue-gc)
+(the same iBlueControlMod board; its README now points to konsolenschatz's
+fork), the 2024 RetroScaler GameCube LED pins merged in
+[patrickmollohan/BlueRetro](https://github.com/patrickmollohan/BlueRetro) and
+[DerDaku/BlueRetro](https://github.com/DerDaku/BlueRetro) (superseded by
+opssemnik's current RetroScaler configs), and
+[maarten040476/BlueRetro_esp_mini](https://github.com/maarten040476/BlueRetro_esp_mini)
+(hard-codes an ESP32-mini LED pin; the package-based pick above covers it).
 
 ## Switch 2 controller support
 
