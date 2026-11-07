@@ -231,29 +231,7 @@ picked up later once the reason below is resolved.
   The one part of it another commit needs, starting the LE connect timer,
   is already included with "Cancel an LE connect the peer never answers".
 
-#### 2. azediawan/BlueRetro: encrypt every PlayStation link up front
-
-* Repo: [azediawan/BlueRetro](https://github.com/azediawan/BlueRetro), branches `master` and `ds4-clone-encryption`
-* Commits:
-  * [`907832c`](https://github.com/azediawan/BlueRetro/commit/907832c50c7cbc39ff0a012600e0db6b5d0272a0)
-    "[BT] Fix DS4 clone handshake: encrypt link, stop guessing DualSense"
-    (only its refused-connection logging was taken)
-  * [`55d2fd5`](https://github.com/azediawan/BlueRetro/commit/55d2fd58707b9625562db89c714642e69d940164)
-    "[BT] Wait for encryption before opening the HID control channel"
-* What it does: encrypts the link of every PlayStation controller right after
-  pairing, opens the HID channel only once encryption is up (for every
-  device that uses encryption, Switch and generic HID included), and only
-  speaks DualSense to a pad positively identified as one instead of
-  assuming it after 1 s without a DS4 report.
-* Why not now: the clone pads it targets are already handled by
-  tassiolucas's fix, which only reacts when a pad actually refuses the
-  unencrypted connection, so working controllers never take a new path.
-  azediawan's version changes the connection sequence for every PlayStation,
-  Switch and generic HID controller, and the DualSense change could stop
-  rumble/LED setup on pads only recognised by the fallback. Worth revisiting
-  if a clone shows up that the reactive fix doesn't cover.
-
-#### 3. DoomyDoomer/BlueRetro: rest of darthcloud's SNES / NES series
+#### 2. DoomyDoomer/BlueRetro: rest of darthcloud's SNES / NES series
 
 * Repo: [DoomyDoomer/BlueRetro](https://github.com/DoomyDoomer/BlueRetro), branch `snes-isr-preload`
   (the first two commits are also on `master`)
@@ -283,33 +261,7 @@ picked up later once the reason below is resolved.
   accessories is selected. The first commit of the series, PCNT bit
   counting, is self-contained and is already included.
 
-#### 4. DoomyDoomer/BlueRetro: rumble on by default
-
-* Repo: [DoomyDoomer/BlueRetro](https://github.com/DoomyDoomer/BlueRetro), branches `master` and `snes-isr-preload`
-* Commit: [`99d3fd6`](https://github.com/DoomyDoomer/BlueRetro/commit/99d3fd6ce12db210051032eb4b2bc961fe5918b4)
-  "Enable rumble by default" (by darthcloud)
-* What it does: sets the default accessory of every output to rumble
-  instead of none.
-* Why not now: it applies to every system, not just SNES: a new or
-  factory-reset N64 setup would default to a Rumble Pak instead of no
-  accessory, and other systems would change too. If rumble by default is
-  wanted, it should be decided per system.
-
-#### 5. bherdm/BlueRetroForever: the Bluetooth LED rework
-
-* Repo: [bherdm/BlueRetroForever](https://github.com/bherdm/BlueRetroForever), branch `main`
-* Commit: [`4a7bf8e`](https://github.com/bherdm/BlueRetroForever/commit/4a7bf8ec3b0e86e654936418bc2e8602898d5a88)
-  "The Bluetooth LED at a saved level, without PWM, and led <1-5> on the serial port"
-* What it does: drops the LED's PWM. Pairing blinks at 1 Hz, an error is
-  solid, and the brightness is a saved level, by default the pin's pull-up
-  alone (a faint glow). Adds `led <1-5>` on the serial port and the 0x7B LED
-  level verb, and a new `hw_config` field.
-* Why not now: it changes how the LED looks on every board, by default, for
-  a dimming feature only some boards need. Only its linker change (the LED
-  code runs from flash, which frees IRAM) is included. To take the rest,
-  keep upstream's pulse as the default and make the new levels opt-in.
-
-#### 6. eaudunord/BlueRetro: Saturn default remap and global trigger change
+#### 3. eaudunord/BlueRetro: Saturn default remap and global trigger change
 
 * Repo: [eaudunord/BlueRetro](https://github.com/eaudunord/BlueRetro), branch `saturn-keyboard-standard-map`
 * Commits: [`5592b2a`](https://github.com/eaudunord/BlueRetro/commit/5592b2a40192c52b8a7a6cfed3b911471a877504)
@@ -324,19 +276,6 @@ picked up later once the reason below is resolved.
 * Why not now: each changes defaults or mappings for existing users (the
   last for every console), not only for the new devices. They can come back
   as opt-in settings.
-
-Also checked: coolbho3k's DualSense adaptive-trigger effects are already in
-this tree from upstream, so there was nothing to take.
-
-Board forks not taken because the boards above already cover them:
-[dclstn/blueretro-iblue-gc](https://github.com/dclstn/blueretro-iblue-gc)
-(the same iBlueControlMod board; its README now points to konsolenschatz's
-fork), the 2024 RetroScaler GameCube LED pins merged in
-[patrickmollohan/BlueRetro](https://github.com/patrickmollohan/BlueRetro) and
-[DerDaku/BlueRetro](https://github.com/DerDaku/BlueRetro) (superseded by
-opssemnik's current RetroScaler configs), and
-[maarten040476/BlueRetro_esp_mini](https://github.com/maarten040476/BlueRetro_esp_mini)
-(hard-codes an ESP32-mini LED pin; the package-based pick above covers it).
 
 ## Switch 2 controller support
 
