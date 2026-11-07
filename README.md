@@ -84,6 +84,9 @@ Not carried by any of those forks:
 **Wiimote as a pointing device.** The Wiimote's IR camera now drives
 pointer outputs. See [Wiimote pointer](#wiimote-pointer) below.
 
+**Changes absorbed from other forks.** See
+[Absorbed from other forks](#absorbed-from-other-forks) below.
+
 ## About BlueRetro
 
 <p align="center"><img src="/static/PNGs/BRE_Logo_Color_Outline.png" width="600"/></p>
@@ -114,8 +117,44 @@ Tips:
 Adding another absolute pointing device (e.g. a tablet or touch screen
 protocol) only needs the system to advertise `WIRED_PTR_ABS` for its mode
 in `wired_ptr_caps()` (`main/adapter/wired/wired.c`) and to read the
-absolute position from the LX/LY axes. CRT-timed light guns (Zapper,
-Menacer, GunCon, ...) are a different problem and are not covered.
+absolute position from the LX/LY axes. The PlayStation GunCon is a good
+candidate: it measures the screen timing itself and reports X/Y as plain data
+over the pad protocol. Guns that rely on the console sampling the light
+sensor against the beam (Zapper, Super Scope, Menacer, Justifier, ...) need
+console-side timing and are not covered.
+
+## Absorbed from other forks
+
+Fixes and features picked from other forks of BlueRetro, with their original
+authors kept on each commit. Each commit message names its source fork and
+any change made while porting it to ESP-IDF 6.1.
+
+| From | What |
+|---|---|
+| [bherdm/BlueRetroForever](https://github.com/bherdm/BlueRetroForever) | Cancel an LE connect the peer never answers, retry a failed SW2 SPI read, ignore unrequested SET_LED / pairing acks, disconnect logging; OTA: writes without response (~3x faster updates), errors for a rejected image, full firmware name/version reads; disconnect every peer (config interface included) before restart / sleep; QEMU heap fix |
+| [tassiolucas/BlueRetro](https://github.com/tassiolucas/BlueRetro) | DS4 clones that refuse HID until the link is encrypted (QRD Spark N5, Maestro S3, Fantech Nova II...) |
+| [azediawan/BlueRetro](https://github.com/azediawan/BlueRetro) | Log refused L2CAP connections |
+| [rpf16rj/BlueRetro](https://github.com/rpf16rj/BlueRetro) | DualSense accurate haptics (vibration v2); PS1/PS2 rumble queued on every poll again |
+| [pummra/BlueRetro](https://github.com/pummra/BlueRetro) | BLE reconnect when several devices share one advertising event |
+| [jjtcm/BlueRetro](https://github.com/jjtcm/BlueRetro) | LE Secure Connections pairing (ported to PSA Crypto, used only when a peer refuses legacy pairing); 2026 Steam Controller (Triton) over BLE; `tools/br_trace.py` HCI trace decoder; sturdier memory card debug reads |
+| [arcticlula/BlueRetro-PS2-Multitap](https://github.com/arcticlula/BlueRetro-PS2-Multitap) | PS2 multitap on port 1 with Multitap = Alt (slot lines on GPIO 18/23 from an sd2psx helper, or inferred from poll order) |
+| [Scyllinice/BlueRetro](https://github.com/Scyllinice/BlueRetro) | Genesis: level-driven 3/6-button pad emulation (fixes dropped inputs and C/Start flicker with fast readers) |
+| [DoomyDoomer/BlueRetro](https://github.com/DoomyDoomer/BlueRetro) | SNES: count clocked bits with PCNT and only apply commands of a sane length (darthcloud's post-archive work) |
+| [Modac/BlueRetro](https://github.com/Modac/BlueRetro) | WS2812 per-port status LEDs on N64/GC (off by default, configured over the BLE config interface) |
+
+Looked at and not taken yet, with the reason:
+
+* bherdm: back to a 3 s LE supervision timeout. It fixes a first NSO GC
+  pairing on bherdm's bench but undoes the 20 s the SW2 multi-controller
+  support relies on; needs testing with 2+ SW2 pads.
+* azediawan: encrypting every PS link up front and only speaking DualSense
+  after a positive identification. Changes timing for pads that work today.
+* DoomyDoomer / darthcloud: the rest of the SNES/NES series (random press fix,
+  latch preload, NES moved to the SNES SPI driver with analog/rumble). It
+  changes the npiso output format that the Virtual Boy (and NES, if it stays
+  on npiso) still read, and NES would lose Four Score, FC keyboard and
+  trackball. Needs those paths ported first.
+* darthcloud: rumble enabled by default on every system.
 
 ## Switch 2 controller support
 
