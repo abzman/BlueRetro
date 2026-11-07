@@ -142,19 +142,92 @@ any change made while porting it to ESP-IDF 6.1.
 | [DoomyDoomer/BlueRetro](https://github.com/DoomyDoomer/BlueRetro) | SNES: count clocked bits with PCNT and only apply commands of a sane length (darthcloud's post-archive work) |
 | [Modac/BlueRetro](https://github.com/Modac/BlueRetro) | WS2812 per-port status LEDs on N64/GC (off by default, configured over the BLE config interface) |
 
-Looked at and not taken yet, with the reason:
+### Looked at and not taken yet
 
-* bherdm: back to a 3 s LE supervision timeout. It fixes a first NSO GC
-  pairing on bherdm's bench but undoes the 20 s the SW2 multi-controller
-  support relies on; needs testing with 2+ SW2 pads.
-* azediawan: encrypting every PS link up front and only speaking DualSense
-  after a positive identification. Changes timing for pads that work today.
-* DoomyDoomer / darthcloud: the rest of the SNES/NES series (random press fix,
-  latch preload, NES moved to the SNES SPI driver with analog/rumble). It
-  changes the npiso output format that the Virtual Boy (and NES, if it stays
-  on npiso) still read, and NES would lose Four Score, FC keyboard and
-  trackball. Needs those paths ported first.
-* darthcloud: rumble enabled by default on every system.
+These changes were reviewed while absorbing the forks above and deliberately
+left out for now. Each one is listed with where to find it, so it can be
+picked up later once the reason below is resolved.
+
+#### 1. bherdm/BlueRetroForever: shorter LE supervision timeout
+
+* Repo: [bherdm/BlueRetroForever](https://github.com/bherdm/BlueRetroForever), branch `main`
+* Commit: [`64f852c`](https://github.com/bherdm/BlueRetroForever/commit/64f852cdb06a859fbb50e0cd525c4f9e5f8d7bca)
+  "Keep upstream's LE supervision timeout and radio policy after a connect"
+* What it does: goes back from a 20 s to upstream's 3 s LE supervision
+  timeout, and drops the advertising/scan policy applied right after an LE
+  connection.
+* Why not now: it fixes a first-time NSO GameCube controller pairing on
+  bherdm's bench, but it undoes the 20 s timeout and radio policy that this
+  fork's Switch 2 multi-controller support was built on (a second SW2
+  controller's bring-up starved the first link at 3 s). The two results
+  contradict each other and neither has been reproduced here. Take it only
+  after testing pairing and reconnecting with two or more SW2 controllers.
+  The one part of it another commit needs, starting the LE connect timer,
+  is already included with "Cancel an LE connect the peer never answers".
+
+#### 2. azediawan/BlueRetro: encrypt every PlayStation link up front
+
+* Repo: [azediawan/BlueRetro](https://github.com/azediawan/BlueRetro), branches `master` and `ds4-clone-encryption`
+* Commits:
+  * [`907832c`](https://github.com/azediawan/BlueRetro/commit/907832c50c7cbc39ff0a012600e0db6b5d0272a0)
+    "[BT] Fix DS4 clone handshake: encrypt link, stop guessing DualSense"
+    (only its refused-connection logging was taken)
+  * [`55d2fd5`](https://github.com/azediawan/BlueRetro/commit/55d2fd58707b9625562db89c714642e69d940164)
+    "[BT] Wait for encryption before opening the HID control channel"
+* What it does: encrypts the link of every PlayStation controller right after
+  pairing, opens the HID channel only once encryption is up (for every
+  device that uses encryption, Switch and generic HID included), and only
+  speaks DualSense to a pad positively identified as one instead of
+  assuming it after 1 s without a DS4 report.
+* Why not now: the clone pads it targets are already handled by
+  tassiolucas's fix, which only reacts when a pad actually refuses the
+  unencrypted connection, so working controllers never take a new path.
+  azediawan's version changes the connection sequence for every PlayStation,
+  Switch and generic HID controller, and the DualSense change could stop
+  rumble/LED setup on pads only recognised by the fallback. Worth revisiting
+  if a clone shows up that the reactive fix doesn't cover.
+
+#### 3. DoomyDoomer/BlueRetro: rest of darthcloud's SNES / NES series
+
+* Repo: [DoomyDoomer/BlueRetro](https://github.com/DoomyDoomer/BlueRetro), branch `snes-isr-preload`
+  (the first two commits are also on `master`)
+* Commits, in order (all by darthcloud except the last):
+  * [`ffc724a`](https://github.com/DoomyDoomer/BlueRetro/commit/ffc724ab24eed72b7e0a07ddb829e58f919dc6e7)
+    "FC/NES variant of the SNES analog/rumble mode"
+  * [`c434001`](https://github.com/DoomyDoomer/BlueRetro/commit/c4340011d8fb9042883b4be81e6d0ed916aecc6a)
+    "Use D1 for P2 for consistency"
+  * [`b1c861f`](https://github.com/DoomyDoomer/BlueRetro/commit/b1c861f21f826dee4efa21c31d520af22657a607)
+    "[SNES] Resolve random press"
+  * [`a8c230c`](https://github.com/DoomyDoomer/BlueRetro/commit/a8c230c6e1ee331f1594b719328652894b6f3d20)
+    "[NPISO] Inverse data polarity, handle analog trigger in separate field"
+  * [`a75e253`](https://github.com/DoomyDoomer/BlueRetro/commit/a75e253074f4df549368f5380137578bc9f95fa7)
+    "fix: pre-load SPI buffer to eliminate LATCH ISR latency for single adapter running on P2" (DoomyDoomer)
+* What it does: fixes random button presses on SNES by inverting the SPI data
+  lines, cuts latch latency, and moves NES from the npiso driver to the SNES
+  SPI driver to give it the SNES analog/rumble mode.
+* Why not now: the commits only work as a set, and the set breaks other
+  systems. `a8c230c` inserts a field at the start of the npiso output and
+  inverts its polarity, but the Virtual Boy still reads that output through
+  the old npiso driver, so it would read wrong data. Moving NES to the SNES
+  SPI driver (`ffc724a`) drops the Four Score / Hori multitap, the Famicom
+  keyboard and the trackball, which only the npiso driver supports.
+  DoomyDoomer runs these on an SNES-only build, where none of that shows.
+  To take them, port the Virtual Boy path (and NES, if it stays on npiso) to
+  the new output format, or keep npiso for NES whenever one of those
+  accessories is selected. The first commit of the series, PCNT bit
+  counting, is self-contained and is already included.
+
+#### 4. DoomyDoomer/BlueRetro: rumble on by default
+
+* Repo: [DoomyDoomer/BlueRetro](https://github.com/DoomyDoomer/BlueRetro), branches `master` and `snes-isr-preload`
+* Commit: [`99d3fd6`](https://github.com/DoomyDoomer/BlueRetro/commit/99d3fd6ce12db210051032eb4b2bc961fe5918b4)
+  "Enable rumble by default" (by darthcloud)
+* What it does: sets the default accessory of every output to rumble
+  instead of none.
+* Why not now: it applies to every system, not just SNES: a new or
+  factory-reset N64 setup would default to a Rumble Pak instead of no
+  accessory, and other systems would change too. If rumble by default is
+  wanted, it should be decided per system.
 
 ## Switch 2 controller support
 
