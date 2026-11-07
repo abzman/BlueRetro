@@ -40,6 +40,29 @@ jobs:
             br_config: gamecube_ibluecontrolmod_safe
             br_hw: _iblue
             br_sys: _gc_safe
+          # RetroScaler adapters (hw1 only), reconstructed from their binaries.
+          - hw_version: hw1
+            br_config: 3do_retroscaler
+          - hw_version: hw1
+            br_config: dreamcast_retroscaler
+          - hw_version: hw1
+            br_config: gamecube_retroscaler
+          - hw_version: hw1
+            br_config: genesis_retroscaler
+          - hw_version: hw1
+            br_config: n64_retroscaler
+          - hw_version: hw1
+            br_config: nes_retroscaler
+          - hw_version: hw1
+            br_config: parallel_1p_retroscaler
+          - hw_version: hw1
+            br_config: parallel_2p_retroscaler
+          - hw_version: hw1
+            br_config: playstation_retroscaler
+          - hw_version: hw1
+            br_config: saturn_retroscaler
+          - hw_version: hw1
+            br_config: snes_retroscaler
           - hw_version: dbg
             br_config: pad_test
           - hw_version: dbg
