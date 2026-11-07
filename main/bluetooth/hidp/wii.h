@@ -103,6 +103,19 @@ struct bt_hidp_wii_core_acc_ir {
     uint8_t ir[12];
 } __packed;
 
+/* IR camera (see wiibrew.org/wiki/Wiimote#IR_Camera) */
+#define BT_HIDP_WII_IR_CAM_ON      0x04 /* Payload for reports 0x13 & 0x1A */
+#define BT_HIDP_WII_IR_MODE_BASIC  0x01 /* 10 bytes, 2 dots per 5 bytes */
+#define BT_HIDP_WII_IR_MODE_EXT    0x03 /* 12 bytes, 3 bytes per dot, with size */
+#define BT_HIDP_WII_IR_DOT_MAX     4
+#define BT_HIDP_WII_IR_X_MAX       1023
+#define BT_HIDP_WII_IR_Y_MAX       767
+struct bt_hidp_wii_ir_ext_dot {
+    uint8_t x_lo;
+    uint8_t y_lo;
+    uint8_t hi_size; /* y[9:8] << 6 | x[9:8] << 4 | size[3:0] */
+} __packed;
+
 #define BT_HIDP_WII_CORE_EXT19 0x34
 struct bt_hidp_wii_core_ext19 {
     uint8_t buttons[2];
