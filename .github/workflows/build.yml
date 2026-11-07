@@ -33,6 +33,8 @@ jobs:
           # iBlueControlMod GameCube board: no "hw2" in the file name, or
           # blueretro.io/ota.html refuses it while the stock firmware runs.
           - hw_version: hw2
+            br_config: playstation_methylenex
+          - hw_version: hw2
             br_config: gamecube_ibluecontrolmod
             br_hw: _iblue
             br_sys: _gc
