@@ -24,6 +24,7 @@
 #include "parallel_2p.h"
 #include "sea.h"
 #include "wii.h"
+#include "adapter/config.h"
 #include "wired.h"
 
 static from_generic_t from_generic_func[WIRED_MAX] = {
@@ -140,6 +141,27 @@ int32_t wired_meta_init(struct wired_ctrl *ctrl_data) {
         return 0;
     }
     return -1;
+}
+
+/* Lets pointing capable sources (e.g. Wiimote IR camera) know if the output
+ * they are mapped to will use pointer input, so they only spend power and
+ * bandwidth producing it when useful. Any output in mouse mode takes
+ * relative motion; systems with absolute pointing devices add their own
+ * modes below. */
+uint32_t wired_ptr_caps(uint32_t out_idx) {
+    uint32_t caps = 0;
+
+    if (out_idx >= WIRED_MAX_DEV || wired_adapter.system_id == WIRED_AUTO) {
+        return 0;
+    }
+
+    switch (config.out_cfg[out_idx].dev_mode) {
+        case DEV_MOUSE:
+            caps |= WIRED_PTR_REL;
+            break;
+    }
+
+    return caps;
 }
 
 void IRAM_ATTR wired_init_buffer(int32_t dev_mode, struct wired_data *wired_data) {
