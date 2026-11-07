@@ -38,6 +38,17 @@ static DRAM_ATTR const struct ctrl_meta cdi_axes_meta[ADAPTER_MAX_AXES] =
     {.size_min = -128, .size_max = 127, .neutral = 0x00, .abs_max = 127, .abs_min = 128},
 };
 
+/* Absolute coordinate device, 10 bit centered */
+static DRAM_ATTR const struct ctrl_meta cdi_abs_axes_meta[ADAPTER_MAX_AXES] =
+{
+    {.size_min = CDI_ABS_MIN, .size_max = CDI_ABS_MAX, .neutral = 0x00, .abs_max = CDI_ABS_MAX, .abs_min = -CDI_ABS_MIN},
+    {.size_min = CDI_ABS_MIN, .size_max = CDI_ABS_MAX, .neutral = 0x00, .abs_max = CDI_ABS_MAX, .abs_min = -CDI_ABS_MIN, .polarity = 1},
+    {.size_min = CDI_ABS_MIN, .size_max = CDI_ABS_MAX, .neutral = 0x00, .abs_max = CDI_ABS_MAX, .abs_min = -CDI_ABS_MIN},
+    {.size_min = CDI_ABS_MIN, .size_max = CDI_ABS_MAX, .neutral = 0x00, .abs_max = CDI_ABS_MAX, .abs_min = -CDI_ABS_MIN, .polarity = 1},
+    {.size_min = CDI_ABS_MIN, .size_max = CDI_ABS_MAX, .neutral = 0x00, .abs_max = CDI_ABS_MAX, .abs_min = -CDI_ABS_MIN},
+    {.size_min = CDI_ABS_MIN, .size_max = CDI_ABS_MAX, .neutral = 0x00, .abs_max = CDI_ABS_MAX, .abs_min = -CDI_ABS_MIN},
+};
+
 struct cdi_map {
     uint8_t buttons;
     uint8_t align[5];
@@ -56,6 +67,24 @@ static DRAM_ATTR const uint32_t cdi_btns_mask[32] = {
     0, 0, 0, 0,
     0, 0, 0, 0,
     0, 0, 0, 0,
+};
+
+/* Absolute coordinate device ("GamePad Alt"), e.g. Peacekeeper light gun.
+ * LX/LY is the pointer position (WIRED_PTR_ABS). Face buttons map so a
+ * Wiimote held like a remote fires with B (trigger) and uses A for
+ * button 2, 1/2 keep their pad meaning, and mouse left/right buttons
+ * (any pointer source) are button 1/2. */
+static const uint32_t cdi_abs_mask[4] = {0x110F000F, 0x00000000, 0x00000000, BR_COMBO_MASK};
+static const uint32_t cdi_abs_desc[4] = {0x0000000F, 0x00000000, 0x00000000, 0x00000000};
+static DRAM_ATTR const uint32_t cdi_abs_btns_mask[32] = {
+    0, 0, 0, 0,
+    0, 0, 0, 0,
+    0, 0, 0, 0,
+    0, 0, 0, 0,
+    BIT(CDI_1), BIT(CDI_1), BIT(CDI_2), BIT(CDI_2),
+    0, 0, 0, 0,
+    BIT(CDI_2), 0, 0, 0,
+    BIT(CDI_1), 0, 0, 0,
 };
 
 static const uint32_t cdi_mouse_mask[4] = {0x190000F0, 0x00000000, 0x00000000, BR_COMBO_MASK};
@@ -313,7 +342,7 @@ void IRAM_ATTR cdi_init_buffer(int32_t dev_mode, struct wired_data *wired_data) 
             wired_data->output[2] = 0x00;
             for (uint32_t i = 0; i < 2; i++) {
                 map->raw_axes[i] = 0;
-                map->relative[i] = 1;
+                map->relative[i] = (dev_mode == DEV_PAD_ALT) ? 0 : 1;
             }
             memset(wired_data->output_mask, 0xFF, sizeof(struct cdi_map));
             break;
@@ -335,6 +364,11 @@ void cdi_meta_init(struct wired_ctrl *ctrl_data) {
                     ctrl_data[i].mask = cdi_mouse_mask;
                     ctrl_data[i].desc = cdi_mouse_desc;
                     ctrl_data[i].axes[j].meta = &cdi_axes_meta[j];
+                    break;
+                case DEV_PAD_ALT:
+                    ctrl_data[i].mask = cdi_abs_mask;
+                    ctrl_data[i].desc = cdi_abs_desc;
+                    ctrl_data[i].axes[j].meta = &cdi_abs_axes_meta[j];
                     break;
                 default:
                     ctrl_data[i].mask = cdi_mask;
@@ -414,6 +448,46 @@ static void cdi_mouse_from_generic(struct wired_ctrl *ctrl_data, struct wired_da
     }
 
     memcpy(wired_data->output, (void *)&map_tmp, sizeof(map_tmp) - 8);
+}
+
+static void cdi_abs_from_generic(struct wired_ctrl *ctrl_data, struct wired_data *wired_data) {
+    struct cdi_map map_tmp;
+    int32_t *raw_axes = (int32_t *)(wired_data->output + 8);
+    uint8_t mapped = 0, pressed = 0;
+
+    memcpy((void *)&map_tmp, wired_data->output, sizeof(map_tmp));
+
+    /* Two src buttons share each CD-i button, so OR all pressed sources
+     * instead of set/clear per source (releasing one must not clear the
+     * bit while the other is still held). */
+    for (uint32_t i = 0; i < ARRAY_SIZE(generic_btns_mask); i++) {
+        if (ctrl_data->map_mask[0] & BIT(i)) {
+            mapped |= cdi_abs_btns_mask[i];
+            if (ctrl_data->btns[0].value & generic_btns_mask[i]) {
+                pressed |= cdi_abs_btns_mask[i];
+                wired_data->cnt_mask[i] = ctrl_data->btns[0].cnt_mask[i];
+            }
+            else {
+                wired_data->cnt_mask[i] = 0;
+            }
+        }
+    }
+    map_tmp.buttons = (map_tmp.buttons & ~mapped) | pressed;
+
+    for (uint32_t i = 0; i < 2; i++) {
+        if (ctrl_data->map_mask[0] & (axis_to_btn_mask(i) & cdi_abs_desc[0])) {
+            map_tmp.relative[cdi_axes_idx[i]] = 0;
+            raw_axes[cdi_axes_idx[i]] = ctrl_data->axes[i].value;
+        }
+        wired_data->cnt_mask[axis_to_btn_id(i)] = ctrl_data->axes[i].cnt_mask;
+    }
+
+    memcpy(wired_data->output, (void *)&map_tmp, sizeof(map_tmp) - 8);
+
+    TESTS_CMDS_LOG("\"wired_output\": {\"axes\": [%ld, %ld], \"btns\": %d},\n",
+        raw_axes[0], raw_axes[1], map_tmp.buttons);
+    BT_MON_LOG("\"wired_output\": {\"axes\": [%08lX, %08lX], \"btns\": %02X},\n",
+        raw_axes[0], raw_axes[1], map_tmp.buttons);
 }
 
 static void cdi_kb_from_generic(struct wired_ctrl *ctrl_data, struct wired_data *wired_data) {
@@ -555,6 +629,9 @@ void cdi_from_generic(int32_t dev_mode, struct wired_ctrl *ctrl_data, struct wir
         case DEV_MOUSE:
             cdi_mouse_from_generic(ctrl_data, wired_data);
             break;
+        case DEV_PAD_ALT:
+            cdi_abs_from_generic(ctrl_data, wired_data);
+            break;
         default:
             cdi_ctrl_from_generic(ctrl_data, wired_data);
             break;
@@ -563,21 +640,23 @@ void cdi_from_generic(int32_t dev_mode, struct wired_ctrl *ctrl_data, struct wir
 
 void IRAM_ATTR cdi_gen_turbo_mask(struct wired_data *wired_data) {
     struct cdi_map *map_mask = (struct cdi_map *)wired_data->output_mask;
+    const uint32_t *btns_mask = (config.out_cfg[wired_data->index].dev_mode == DEV_PAD_ALT)
+        ? cdi_abs_btns_mask : cdi_btns_mask;
 
     memset(map_mask, 0xFF, sizeof(*map_mask));
 
     for (uint32_t i = 0; i < ARRAY_SIZE(cdi_btns_mask); i++) {
         uint8_t mask = wired_data->cnt_mask[i] >> 1;
 
-        if (cdi_btns_mask[i] && mask) {
+        if (btns_mask[i] && mask) {
             if (wired_data->cnt_mask[i] & 1) {
                 if (!(mask & wired_data->frame_cnt)) {
-                    map_mask->buttons &= ~cdi_btns_mask[i];
+                    map_mask->buttons &= ~btns_mask[i];
                 }
             }
             else {
                 if (!((mask & wired_data->frame_cnt) == mask)) {
-                    map_mask->buttons &= ~cdi_btns_mask[i];
+                    map_mask->buttons &= ~btns_mask[i];
                 }
             }
         }

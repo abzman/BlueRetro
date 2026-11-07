@@ -53,6 +53,7 @@ struct cdi_ctrl_port {
     uint8_t data_sig;
     uint8_t uart_mod;
     uint8_t id_code;
+    uint8_t abs_ptr; /* 'T' as absolute coordinate device rather than 'T' keyboard */
     uint8_t tx_in_progress;
 };
 
@@ -127,6 +128,16 @@ static inline uint8_t load_data(uint8_t port, uint8_t *data) {
         }
     }
     return move;
+}
+
+static inline uint8_t load_abs_data(uint8_t port, uint8_t *data) {
+    int32_t *raw_axes = (int32_t *)(wired_adapter.data[port].output + 8);
+    int32_t *raw_axes_mask = (int32_t *)(wired_adapter.data[port].output_mask + 8);
+    uint8_t btns = wired_adapter.data[port].output[0] & wired_adapter.data[port].output_mask[0];
+
+    cdi_abs_encode(btns, raw_axes[0] & raw_axes_mask[0], raw_axes[1] & raw_axes_mask[1], 0, data);
+
+    return 0;
 }
 
 static inline uint8_t load_k_kb_data(uint8_t port, uint8_t *data) {
@@ -224,8 +235,18 @@ static void tx_hdlr(void) {
                         len = 2;
                         break;
                     case 'T':
-                        update = load_t_kb_data(i, tmp);
-                        len = 4;
+                        if (p->abs_ptr) {
+                            load_abs_data(i, tmp);
+                            len = CDI_ABS_PKT_LEN;
+                            /* Absolute devices report position, only send on change */
+                            update = (memcmp(p->buffer, tmp, CDI_ABS_PKT_LEN) != 0);
+                            ++wired_adapter.data[i].frame_cnt;
+                            cdi_gen_turbo_mask(&wired_adapter.data[i]);
+                        }
+                        else {
+                            update = load_t_kb_data(i, tmp);
+                            len = 4;
+                        }
                         break;
                     default:
                         update = load_data(i, tmp);
@@ -292,6 +313,10 @@ void cdi_uart_init(uint32_t package) {
             case DEV_MOUSE:
                 p->id_code = 'M';
                 break;
+            case DEV_PAD_ALT:
+                p->id_code = CDI_ABS_ID;
+                p->abs_ptr = 1;
+                break;
             default:
                 p->id_code = 'J';
                 break;
@@ -350,7 +375,13 @@ void cdi_uart_init(uint32_t package) {
         uart_ll_rxfifo_rst(p->hw);
         uart_ll_txfifo_rst(p->hw);
 
-        memcpy(p->buffer, wired_adapter.data[i].output, 4);
+        if (p->abs_ptr) {
+            /* Packet sent right after the ID byte on RTS, start centered */
+            load_abs_data(i, p->buffer);
+        }
+        else {
+            memcpy(p->buffer, wired_adapter.data[i].output, 4);
+        }
     }
 
     intexc_alloc_iram(ETS_UART1_INTR_SOURCE, UART1_INTR_NUM, isr_dispatch);

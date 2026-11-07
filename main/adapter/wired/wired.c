@@ -161,6 +161,16 @@ uint32_t wired_ptr_caps(uint32_t out_idx) {
             break;
     }
 
+    /* Absolute pointing devices, per system */
+    switch (wired_adapter.system_id) {
+        case CDI:
+            /* Absolute coordinate device, e.g. Peacekeeper light gun */
+            if (config.out_cfg[out_idx].dev_mode == DEV_PAD_ALT) {
+                caps |= WIRED_PTR_ABS;
+            }
+            break;
+    }
+
     return caps;
 }
 
