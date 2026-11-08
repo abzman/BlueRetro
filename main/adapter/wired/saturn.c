@@ -233,6 +233,11 @@ static uint8_t IRAM_ATTR saturn_axis_supported(uint32_t index, uint32_t axis) {
     return 1;
 }
 
+static uint8_t saturn_is_3d_pad(uint32_t index) {
+    return (config.out_cfg[index].dev_mode == DEV_PAD_ALT
+        && config.out_cfg[index].acc_mode != ACC_MEM && config.out_cfg[index].acc_mode != ACC_RUMBLE);
+}
+
 static const uint32_t *saturn_get_mask(uint32_t index) {
     return (config.out_cfg[index].dev_mode == DEV_PAD_ALT && config.out_cfg[index].acc_mode == ACC_MEM) ?
         saturn_mission_mask : saturn_3d_mask;
@@ -372,7 +377,9 @@ void saturn_ctrl_from_generic(struct wired_ctrl *ctrl_data, struct wired_data *w
                 map_tmp.buttons &= ~saturn_btns_mask[i];
                 wired_data->cnt_mask[i] = ctrl_data->btns[0].cnt_mask[i];
             }
-            else if (!(config.out_cfg[ctrl_data->index].dev_mode == DEV_PAD_ALT && (i == PAD_LM || i == PAD_RM))) {
+            /* The 3D pad's L and R follow its analog triggers (below), so a released LM/RM
+             * mustn't clear them; the Mission Stick and Arcade Racer have no analog triggers */
+            else if (!(saturn_is_3d_pad(ctrl_data->index) && (i == PAD_LM || i == PAD_RM))) {
                 map_tmp.buttons |= saturn_btns_mask[i];
                 wired_data->cnt_mask[i] = 0;
             }
