@@ -720,6 +720,9 @@ reset_dev:
     bt_hci_disarm_conn_watchdog(device);
 
     adapter_init_buffer(dev_id);
+    /* The previous device's parsed descriptor too: a device that sends none (the descriptor-less
+     * Xbox layout) would otherwise be decoded with it */
+    hid_parser_free_reports(dev_id);
     memset(bt_adapter.data[dev_id].raw_src_mappings, 0, sizeof(*bt_adapter.data[0].raw_src_mappings) * REPORT_MAPPED_MAX);
     memset(bt_adapter.data[dev_id].reports, 0, sizeof(bt_adapter.data[0].reports));
     memset(&bt_adapter.data[dev_id].base, 0, sizeof(bt_adapter.data[0].base));
