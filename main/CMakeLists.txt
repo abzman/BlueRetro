@@ -42,14 +42,8 @@ set(cov_srcs
     # "tests/mouse_mapper_test.c"
     # "tools/mouse_test_harness.c"
     "bluetooth/host.c"
-    "bluetooth/hci.c"
-    "bluetooth/l2cap.c"
-    "bluetooth/sdp.c"
-    "bluetooth/att.c"
     "bluetooth/att_cfg.c"
     "bluetooth/att_hid.c"
-    "bluetooth/smp.c"
-    "bluetooth/smp_sc.c"
     "bluetooth/mon.c"
     "bluetooth/hidp/hidp.c"
     "bluetooth/hidp/generic.c"
@@ -65,6 +59,17 @@ set(cov_srcs
     "system/console_cmd.c"
     "tools/devcrypto.c"
     "tools/ps1_gameid.c"
+)
+
+# The Bluetooth link layers: never run in the coverage build (dbg/qemu has
+# CONFIG_BLUERETRO_BT_DISABLE), and their gcov counters no longer fit in its DRAM.
+set(nocov_srcs
+    "bluetooth/hci.c"
+    "bluetooth/l2cap.c"
+    "bluetooth/sdp.c"
+    "bluetooth/att.c"
+    "bluetooth/smp.c"
+    "bluetooth/smp_sc.c"
 )
 
 set(srcs
@@ -120,7 +125,7 @@ if(CONFIG_BLUERETRO_COVERAGE)
 endif()
 
 idf_component_register(
-    SRCS "${srcs}" "${cov_srcs}"
+    SRCS "${srcs}" "${cov_srcs}" "${nocov_srcs}"
     PRIV_INCLUDE_DIRS "."
     LDFRAGMENTS linker.lf
 )
