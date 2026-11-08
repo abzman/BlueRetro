@@ -404,6 +404,8 @@ static void real_silly_from_generic(struct wired_ctrl *ctrl_data, struct wired_d
 
     memcpy(wired_data->output, (void *)&map_tmp, sizeof(map_tmp));
 
+    TESTS_CMDS_LOG("\"wired_output\": {\"ids\": [%d, %d], \"btns\": %d},\n",
+        map_tmp.ids[0], map_tmp.ids[1], map_tmp.buttons);
 #ifdef CONFIG_BLUERETRO_RAW_OUTPUT
     printf("{\"log_type\": \"wired_output\", \"btns\": %d}\n", map_tmp.buttons);
 #endif

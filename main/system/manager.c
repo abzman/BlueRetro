@@ -32,6 +32,7 @@
 #include "bare_metal_app_cpu.h"
 #include "serial_cmd.h"
 #include "console_cmd.h"
+#include "tests/cmds.h"
 #include "manager.h"
 
 /* GPIO matrix signal index for one LEDC channel.
@@ -733,6 +734,13 @@ static void sys_mgr_wired_reset(void) {
 }
 
 void sys_mgr_cmd(uint8_t cmd) {
+#ifdef CONFIG_BLUERETRO_QEMU
+    /* No wired driver nor second core to restart under QEMU, and no flash to reset: report the
+     * command so the tests see a reset, power off or factory reset asked for, and do nothing */
+    printf("# %s %d (QEMU: ignored)\n", __FUNCTION__, cmd);
+    TESTS_CMDS_LOG("\"sys_mgr_cmd\": %d,\n", cmd);
+    return;
+#endif
     if (cmd_q_hdl) {
         UBaseType_t ret = xRingbufferSend(cmd_q_hdl, &cmd, sizeof(cmd), portMAX_DELAY);
         if (ret != pdTRUE) {

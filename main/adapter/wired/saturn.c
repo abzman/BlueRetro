@@ -434,9 +434,13 @@ void saturn_ctrl_from_generic(struct wired_ctrl *ctrl_data, struct wired_data *w
 
     memcpy(wired_data->output, (void *)&map_tmp, sizeof(map_tmp));
 
-    TESTS_CMDS_LOG("\"wired_output\": {\"axes\": [%d, %d, %d, %d], \"btns\": %d},\n",
+    TESTS_CMDS_LOG("\"wired_output\": {\"axes\": [%d, %d, %d, %d], \"btns\": %d, \"raw_axes\": [",
         map_tmp.axes[saturn_axes_idx[0]], map_tmp.axes[saturn_axes_idx[1]],
         map_tmp.axes[saturn_axes_idx[4]], map_tmp.axes[saturn_axes_idx[5]], map_tmp.buttons);
+    for (uint32_t i = 0; i < sizeof(map_tmp.axes); i++) {
+        TESTS_CMDS_LOG("%s%d", i ? ", " : "", map_tmp.axes[i]);
+    }
+    TESTS_CMDS_LOG("]},\n");
     BT_MON_LOG("\"wired_output\": {\"axes\": [%02X, %02X, %02X, %02X], \"btns\": %04X},\n",
         map_tmp.axes[saturn_axes_idx[0]], map_tmp.axes[saturn_axes_idx[1]],
         map_tmp.axes[saturn_axes_idx[4]], map_tmp.axes[saturn_axes_idx[5]], map_tmp.buttons);

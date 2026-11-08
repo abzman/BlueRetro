@@ -448,6 +448,10 @@ static void cdi_mouse_from_generic(struct wired_ctrl *ctrl_data, struct wired_da
     }
 
     memcpy(wired_data->output, (void *)&map_tmp, sizeof(map_tmp) - 8);
+
+    /* The axes as the wire driver will take them: accumulated motion for a relative source */
+    TESTS_CMDS_LOG("\"wired_output\": {\"axes\": [%ld, %ld], \"relative\": [%d, %d], \"btns\": %d},\n",
+        raw_axes[0], raw_axes[1], map_tmp.relative[0], map_tmp.relative[1], map_tmp.buttons);
 }
 
 static void cdi_abs_from_generic(struct wired_ctrl *ctrl_data, struct wired_data *wired_data) {

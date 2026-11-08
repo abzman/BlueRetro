@@ -2,6 +2,7 @@
 #include <string.h>
 #include "adapter/adapter.h"
 #include "pbp.h"
+#include "tests/cmds.h"
 
 #define PBP_X_MIN 32
 #define PBP_X_MAX 192
@@ -102,6 +103,7 @@ int32_t pbp_to_generic(struct bt_data *bt_data, struct wireless_ctrl *ctrl_data)
     ctrl_data->axes[AXIS_LY].meta = &pbp_meta[AXIS_LY];
     ctrl_data->axes[AXIS_LY].value = pbp_axis(raw_y, PBP_Y_MIN, PBP_Y_MAX, 1);
 
+    TESTS_CMDS_LOG("\"wireless_input\": {\"raw\": [%ld, %ld], \"btn\": %u},\n", raw_x, raw_y, btn);
     return 0;
 }
 

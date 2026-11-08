@@ -5,6 +5,8 @@
 
 #include <stdio.h>
 #include <stdarg.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include "zephyr/types.h"
 #include "tools/util.h"
 #include "adapter/adapter.h"
@@ -14,6 +16,7 @@
 #include "adapter/wired/n64.h"
 #include "bluetooth/host.h"
 #include "bluetooth/hci.h"
+#include "zephyr/hci.h"
 #include "bluetooth/hidp/hidp.h"
 #include "bluetooth/hidp/sw2.h"
 #include "system/console_cmd.h"
@@ -40,6 +43,11 @@ enum {
 
 static uint32_t log_offset = 0;
 static char log_buffer[4096];
+static uint32_t tx_cnt = 0;
+/* The task running a command: the log is its response. Other tasks (a controller driver's timer,
+ * bt_fb_task) also reach TESTS_CMDS_LOG and bt_host_txq_add, and once wrote into the middle of a
+ * response, or into one on its way out */
+static TaskHandle_t log_task = NULL;
 
 char *tests_cmds_hdlr(struct tests_cmds_pkt *pkt) {
     static struct bt_dev *devices[BT_MAX_DEV] = {0};
@@ -48,6 +56,8 @@ char *tests_cmds_hdlr(struct tests_cmds_pkt *pkt) {
 
     memset(log_buffer, 0, sizeof(log_buffer));
     log_offset = 0;
+    tx_cnt = 0;
+    log_task = xTaskGetCurrentTaskHandle();
     TESTS_CMDS_LOG("{}\n");
     log_offset = 1;
 
@@ -185,7 +195,12 @@ char *tests_cmds_hdlr(struct tests_cmds_pkt *pkt) {
                 struct raw_fb fb_data = {0};
 
                 memcpy(&fb_data, pkt->data, MIN(pkt->data_len, sizeof(fb_data)));
-                adapter_bridge_fb(&fb_data, &bt_adapter.data[device->ids.id]);
+                bool fb_changed = adapter_bridge_fb(&fb_data, &bt_adapter.data[device->ids.id]);
+                TESTS_CMDS_LOG("\"fb_changed\": %d,\n", fb_changed);
+                /* What bt_fb_task sends next: the controller's own output report, in bt_tx */
+                if (fb_changed) {
+                    bt_hid_feedback(device, bt_adapter.data[device->ids.id].base.output);
+                }
             }
             break;
         case TESTS_CMDS_CONSOLE:
@@ -208,11 +223,28 @@ char *tests_cmds_hdlr(struct tests_cmds_pkt *pkt) {
             printf("# %s invalid cmd: 0x%02X\n", __FUNCTION__, pkt->cmd);
             break;
     }
+    log_task = NULL;
     log_buffer[log_offset - 2] = '}';
     return log_buffer;
 }
 
+/* An ACL packet the host would send to a controller (an HIDP output report or an ATT write),
+ * logged as "bt_tx<n>": [bytes] in the order sent. HCI commands aren't: other tasks send those */
+void tests_cmds_log_tx(const uint8_t *packet, uint32_t len) {
+    if (len == 0 || packet[0] != BT_HCI_H4_TYPE_ACL) {
+        return;
+    }
+    TESTS_CMDS_LOG("\"bt_tx%lu\": [", tx_cnt++);
+    for (uint32_t i = 0; i < len; i++) {
+        TESTS_CMDS_LOG("%s%d", i ? ", " : "", packet[i]);
+    }
+    TESTS_CMDS_LOG("],\n");
+}
+
 void tests_cmds_log(const char * format, ...) {
+    if (log_task == NULL || xTaskGetCurrentTaskHandle() != log_task) {
+        return;
+    }
     va_list args;
     va_start(args, format);
     size_t max_len = sizeof(log_buffer) - log_offset;

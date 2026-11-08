@@ -23,5 +23,6 @@ struct tests_cmds_pkt {
 
 char *tests_cmds_hdlr(struct tests_cmds_pkt *pkt);
 void tests_cmds_log(const char * format, ...);
+void tests_cmds_log_tx(const uint8_t *packet, uint32_t len);
 
 #endif /* _CMDS_H_ */

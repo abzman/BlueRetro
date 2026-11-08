@@ -18,6 +18,7 @@
 #include "queue_bss.h"
 #include "host.h"
 #include "hci.h"
+#include "tests/cmds.h"
 #include "l2cap.h"
 #include "sdp.h"
 #include "att_cfg.h"
@@ -807,6 +808,9 @@ int32_t bt_host_init(void) {
 
 int32_t bt_host_txq_add(uint8_t *packet, uint32_t packet_len) {
 #ifdef CONFIG_BLUERETRO_QEMU
+#ifdef CONFIG_BLUERETRO_WS_CMDS
+    tests_cmds_log_tx(packet, packet_len);
+#endif
     return 0;
 #else
     if (txq_hdl == NULL) {
