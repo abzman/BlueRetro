@@ -37,6 +37,7 @@ enum {
     DEV_PSX_PS_2_KB_MOUSE_ADAPTER,
     DEV_PS2_DS2,
     DEV_PS2_MULTITAP,
+    DEV_PSX_GUNCON,
     DEV_TYPE_MAX,
 };
 
@@ -299,7 +300,7 @@ static void toggle_dsr(uint32_t port) {
 
 static void ps_analog_btn_hdlr(struct ps_ctrl_port *port, uint8_t id) {
     if (port->dev_type[id] != DEV_PSX_MOUSE && port->dev_type[id] != DEV_PSX_FLIGHT
-            && port->dev_type[id] != DEV_PSX_PS_2_KB_MOUSE_ADAPTER
+            && port->dev_type[id] != DEV_PSX_PS_2_KB_MOUSE_ADAPTER && port->dev_type[id] != DEV_PSX_GUNCON
             && (port->dev_id[id] == 0x41 || port->dev_id[id] == 0x73)) {
         if (wired_adapter.data[id + port->mt_first_port].output[18]) {
             if (!port->analog_btn[id]) {
@@ -556,6 +557,15 @@ static void ps_cmd_rsp_hdlr(struct ps_ctrl_port *port, uint8_t id, uint8_t cmd, 
                     memcpy(rsp, wired_adapter.data[id + port->mt_first_port].output, 2);
                     load_mouse_axes(id + port->mt_first_port, &rsp[2]);
                     break;
+                case DEV_PSX_GUNCON:
+                {
+                    struct ps_guncon_map *gun = (struct ps_guncon_map *)wired_adapter.data[id + port->mt_first_port].output;
+                    uint32_t xy = gun->xy;
+
+                    memcpy(rsp, &gun->buttons, 2);
+                    memcpy(&rsp[2], &xy, 4);
+                    break;
+                }
                 default:
                     *(uint16_t *)&rsp[0] = wired_adapter.data[id + port->mt_first_port].output16[0]
                         | wired_adapter.data[id + port->mt_first_port].output_mask16[0];
@@ -883,7 +893,8 @@ static void spi_isr(void* arg) {
             else {
                 if (port->idx == 1) {
                     /* Special dev only ACK 0x42 */
-                    if ((port->root_dev_type == DEV_PSX_MOUSE || port->root_dev_type == DEV_PSX_FLIGHT || port->root_dev_type == DEV_PSX_PS_2_KB_MOUSE_ADAPTER)
+                    if ((port->root_dev_type == DEV_PSX_MOUSE || port->root_dev_type == DEV_PSX_FLIGHT || port->root_dev_type == DEV_PSX_PS_2_KB_MOUSE_ADAPTER
+                            || port->root_dev_type == DEV_PSX_GUNCON)
                         && port->rx_buf[port->active_rx_buf][1] != 0x42) {
                         port->valid = 0;
                         port->spi_hw->slave.trans_inten = 0;
@@ -1023,6 +1034,15 @@ void ps_spi_init(uint32_t package) {
                     }
                     break;
                 case DEV_MOUSE:
+                    if (ps_is_guncon(ps_ctrl_ports[i].mt_first_port + j)) {
+                        ps_ctrl_ports[i].dev_id[j] = PS_GUNCON_ID;
+                        ps_ctrl_ports[i].dev_type[j] = DEV_PSX_GUNCON;
+                        if (!ps_ctrl_ports[i].root_dev_type) {
+                            ps_ctrl_ports[i].root_dev_type = DEV_PSX_GUNCON;
+                            goto inner_break;
+                        }
+                        break;
+                    }
                     ps_ctrl_ports[i].dev_id[j] = 0x12;
                     ps_ctrl_ports[i].dev_type[j] = DEV_PSX_MOUSE;
                     if (!ps_ctrl_ports[i].root_dev_type) {

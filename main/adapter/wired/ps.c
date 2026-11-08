@@ -92,6 +92,16 @@ struct ps_map {
     uint8_t analog_btn;
 } __packed;
 
+static DRAM_ATTR const struct ctrl_meta ps_guncon_axes_meta[ADAPTER_MAX_AXES] =
+{
+    {.size_min = PS_GUNCON_PTR_MIN, .size_max = PS_GUNCON_PTR_MAX, .neutral = 0x00, .abs_max = PS_GUNCON_PTR_MAX, .abs_min = -PS_GUNCON_PTR_MIN},
+    {.size_min = PS_GUNCON_PTR_MIN, .size_max = PS_GUNCON_PTR_MAX, .neutral = 0x00, .abs_max = PS_GUNCON_PTR_MAX, .abs_min = -PS_GUNCON_PTR_MIN, .polarity = 1},
+    {.size_min = PS_GUNCON_PTR_MIN, .size_max = PS_GUNCON_PTR_MAX, .neutral = 0x00, .abs_max = PS_GUNCON_PTR_MAX, .abs_min = -PS_GUNCON_PTR_MIN},
+    {.size_min = PS_GUNCON_PTR_MIN, .size_max = PS_GUNCON_PTR_MAX, .neutral = 0x00, .abs_max = PS_GUNCON_PTR_MAX, .abs_min = -PS_GUNCON_PTR_MIN, .polarity = 1},
+    {.size_min = PS_GUNCON_PTR_MIN, .size_max = PS_GUNCON_PTR_MAX, .neutral = 0x00, .abs_max = PS_GUNCON_PTR_MAX, .abs_min = -PS_GUNCON_PTR_MIN},
+    {.size_min = PS_GUNCON_PTR_MIN, .size_max = PS_GUNCON_PTR_MAX, .neutral = 0x00, .abs_max = PS_GUNCON_PTR_MAX, .abs_min = -PS_GUNCON_PTR_MIN},
+};
+
 struct ps_mouse_map {
     uint16_t buttons;
     uint8_t relative[2];
@@ -138,6 +148,27 @@ static const uint32_t ps_mouse_btns_mask[32] = {
     BIT(PS_L1), 0, 0, 0,
     BIT(PS_R1), 0, 0, 0,
 };
+
+/* GunCon: LX/LY is the aim (WIRED_PTR_ABS). A Wiimote held like a remote fires with B and has A
+ * under the thumb; 1, 2 and - are the gun's B. A mouse clicks left to fire, right for A and middle
+ * for B. Any D-pad direction aims off the screen while held (the reload shot), as does losing the
+ * sensor bar. */
+#define PS_GUNCON_TRIGGER BIT(PS_C)
+#define PS_GUNCON_A BIT(PS_START)
+#define PS_GUNCON_B BIT(PS_X)
+static const uint32_t ps_guncon_mask[4] = {0x193F0F0F, 0x00000000, 0x00000000, BR_COMBO_MASK};
+static const uint32_t ps_guncon_desc[4] = {0x0000000F, 0x00000000, 0x00000000, 0x00000000};
+static const uint32_t ps_guncon_btns_mask[32] = {
+    0, 0, 0, 0,
+    0, 0, 0, 0,
+    0, 0, 0, 0,
+    0, 0, 0, 0,
+    PS_GUNCON_B, PS_GUNCON_TRIGGER, PS_GUNCON_B, PS_GUNCON_A,
+    PS_GUNCON_A, PS_GUNCON_B, 0, 0,
+    PS_GUNCON_A, 0, 0, PS_GUNCON_B,
+    PS_GUNCON_TRIGGER, 0, 0, 0,
+};
+#define PS_GUNCON_OFFSCREEN_BTNS 0x00000F00    /* generic D-pad */
 
 static const uint32_t ps_kb_mask[4] = {0xE6FF0F0F, 0xFFFFFFFF, 0xFFFFFFFF, 0x0007FFFF | BR_COMBO_MASK};
 static const uint32_t ps_kb_desc[4] = {0x00000000, 0x00000000, 0x00000000, 0x00000000};
@@ -188,6 +219,14 @@ void IRAM_ATTR ps_init_buffer(int32_t dev_mode, struct wired_data *wired_data) {
         {
             struct ps_mouse_map *map = (struct ps_mouse_map *)wired_data->output;
 
+            if (ps_is_guncon(wired_data->index)) {
+                struct ps_guncon_map *gun = (struct ps_guncon_map *)wired_data->output;
+
+                gun->buttons = 0xFFFF;
+                gun->reserved = 0;
+                gun->xy = PS_GUNCON_X_OFFSCREEN | (PS_GUNCON_Y_OFFSCREEN << 16);
+                break;
+            }
             map->buttons = 0xFCFF;
             for (uint32_t i = 0; i < 2; i++) {
                 map->raw_axes[i] = 0;
@@ -229,6 +268,12 @@ void ps_meta_init(struct wired_ctrl *ctrl_data) {
                 case DEV_MOUSE:
                     if (j >= PS_JOYSTICK_AXES_CNT) {
                         goto exit_axes_loop;
+                    }
+                    if (ps_is_guncon(i)) {
+                        ctrl_data[i].mask = ps_guncon_mask;
+                        ctrl_data[i].desc = ps_guncon_desc;
+                        ctrl_data[i].axes[j].meta = &ps_guncon_axes_meta[j];
+                        break;
                     }
                     ctrl_data[i].mask = ps_mouse_mask;
                     ctrl_data[i].desc = ps_mouse_desc;
@@ -346,6 +391,57 @@ static void ps_mouse_from_generic(struct wired_ctrl *ctrl_data, struct wired_dat
     memcpy(wired_data->output, (void *)&map_tmp, sizeof(map_tmp) - 8);
 }
 
+/* [PS_GUNCON_PTR_MIN, PS_GUNCON_PTR_MAX] onto [min, max] */
+static uint32_t ps_guncon_scale(int32_t v, uint32_t min, uint32_t max) {
+    if (v < PS_GUNCON_PTR_MIN) {
+        v = PS_GUNCON_PTR_MIN;
+    }
+    else if (v > PS_GUNCON_PTR_MAX) {
+        v = PS_GUNCON_PTR_MAX;
+    }
+    return min + ((uint32_t)(v - PS_GUNCON_PTR_MIN) * (max - min)) / (PS_GUNCON_PTR_MAX - PS_GUNCON_PTR_MIN);
+}
+
+static void ps_guncon_from_generic(struct wired_ctrl *ctrl_data, struct wired_data *wired_data) {
+    struct ps_guncon_map map_tmp;
+    uint16_t mapped = 0, pressed = 0;
+    uint32_t offscreen = ctrl_data->flags & CTRL_PTR_OFFSCREEN;
+
+    memcpy((void *)&map_tmp, wired_data->output, sizeof(map_tmp));
+
+    /* Several sources share each gun button: OR the pressed ones, so releasing one doesn't
+     * release the button while another still holds it */
+    for (uint32_t i = 0; i < ARRAY_SIZE(generic_btns_mask); i++) {
+        if (ctrl_data->map_mask[0] & BIT(i)) {
+            mapped |= ps_guncon_btns_mask[i];
+            if (ctrl_data->btns[0].value & generic_btns_mask[i]) {
+                pressed |= ps_guncon_btns_mask[i];
+                if (BIT(i) & PS_GUNCON_OFFSCREEN_BTNS) {
+                    offscreen = 1;
+                }
+            }
+        }
+    }
+    map_tmp.buttons = (map_tmp.buttons | mapped) & ~pressed;
+
+    if (offscreen) {
+        map_tmp.xy = PS_GUNCON_X_OFFSCREEN | (PS_GUNCON_Y_OFFSCREEN << 16);
+    }
+    else if (ctrl_data->map_mask[0] & (axis_to_btn_mask(AXIS_LX) | axis_to_btn_mask(AXIS_LY)) & ps_guncon_desc[0]) {
+        /* LY's meta has polarity set: the adapter hands it over growing down the screen */
+        uint32_t x = ps_guncon_scale(ctrl_data->axes[AXIS_LX].value, PS_GUNCON_X_MIN, PS_GUNCON_X_MAX);
+        uint32_t y = ps_guncon_scale(ctrl_data->axes[AXIS_LY].value, PS_GUNCON_Y_MIN, PS_GUNCON_Y_MAX);
+        map_tmp.xy = x | (y << 16);
+    }
+
+    memcpy(wired_data->output, (void *)&map_tmp, sizeof(map_tmp));
+
+    TESTS_CMDS_LOG("\"wired_output\": {\"btns\": %d, \"x\": %lu, \"y\": %lu},\n",
+        map_tmp.buttons, map_tmp.xy & 0xFFFF, map_tmp.xy >> 16);
+    BT_MON_LOG("\"wired_output\": {\"btns\": %04X, \"x\": %04lX, \"y\": %04lX},\n",
+        map_tmp.buttons, map_tmp.xy & 0xFFFF, map_tmp.xy >> 16);
+}
+
 static void ps_kb_from_generic(struct wired_ctrl *ctrl_data, struct wired_data *wired_data) {
     if (!atomic_test_bit(&wired_data->flags, WIRED_KBMON_INIT)) {
         kbmon_init(ctrl_data->index, ps_kb_id_to_scancode);
@@ -383,7 +479,12 @@ void ps_from_generic(int32_t dev_mode, struct wired_ctrl *ctrl_data, struct wire
             ps_kb_from_generic(ctrl_data, wired_data);
             break;
         case DEV_MOUSE:
-            ps_mouse_from_generic(ctrl_data, wired_data);
+            if (ps_is_guncon(ctrl_data->index)) {
+                ps_guncon_from_generic(ctrl_data, wired_data);
+            }
+            else {
+                ps_mouse_from_generic(ctrl_data, wired_data);
+            }
             break;
         default:
             ps_ctrl_from_generic(ctrl_data, wired_data);

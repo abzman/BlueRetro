@@ -169,6 +169,13 @@ uint32_t wired_ptr_caps(uint32_t out_idx) {
                 caps |= WIRED_PTR_ABS;
             }
             break;
+        case PSX:
+        case PS2:
+            /* GunCon: Mouse mode with the rumble accessory */
+            if (ps_is_guncon(out_idx)) {
+                caps = WIRED_PTR_ABS;
+            }
+            break;
     }
 
     return caps;

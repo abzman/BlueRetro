@@ -103,23 +103,29 @@ Wiimote is mapped to uses a pointer, so it costs no battery otherwise.
 |---|---|---|
 | **Mouse** on any system with mouse support (SNES, PS1/PS2, N64, Saturn, Genesis, Dreamcast, PCE, PC-FX, 3DO, CD-i, ...) | Mouse: aiming moves the cursor | B = left click, A = right click |
 | **GamePad Alt** on CD-i | Absolute coordinate device (Peacekeeper light gun) | B / 1 = button 1, A / 2 = button 2 |
+| **Mouse** + **Rumble** accessory on PS1/PS2 (**Both** accessories keeps the memory card) | Namco GunCon (Time Crisis, Point Blank, Die Hard Trilogy 2, ...) | B = trigger, A / + = A, 1 / 2 / - = B; D-pad held or no sensor bar in view = aiming off the screen (the reload shot) |
 
 Tips:
 
-* For absolute outputs (CD-i GamePad Alt), set the deadzone of the left stick
+* For absolute outputs (CD-i GamePad Alt, GunCon), set the deadzone of the left stick
   X/Y mappings to 0 % in the advanced mapping config, otherwise the pointer
   sticks around screen center. Then run the game's own gun calibration.
 * Mouse speed follows the mapping's scale (max %) of the right stick X/Y.
 * If vertical aim is inverted on your setup, swap the Y up/down mapping.
+* The GunCon reports the NTSC picture's range. On a PAL console the game's
+  calibration has less room to work with: calibrate, and if the shots land
+  off vertically, say so in an issue.
+* The GunCon also works from a gamepad: the left stick aims across the
+  whole screen.
 * With a Nunchuk or other extension plugged in, the Wiimote behaves as
   before and the camera stays off.
 
 Adding another absolute pointing device (e.g. a tablet or touch screen
 protocol) only needs the system to advertise `WIRED_PTR_ABS` for its mode
 in `wired_ptr_caps()` (`main/adapter/wired/wired.c`) and to read the
-absolute position from the LX/LY axes. The PlayStation GunCon is a good
-candidate: it measures the screen timing itself and reports X/Y as plain data
-over the pad protocol. Guns that rely on the console sampling the light
+absolute position from the LX/LY axes, as the CD-i and the GunCon do. An output
+that can aim off the screen reads `CTRL_PTR_OFFSCREEN` in the controller's
+flags, set while the Wiimote sees no sensor bar. Guns that rely on the console sampling the light
 sensor against the beam (Zapper, Super Scope, Menacer, Justifier, ...) need
 console-side timing and are not covered.
 
