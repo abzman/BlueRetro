@@ -105,7 +105,9 @@ jobs:
           br_version="${GITHUB_REF#refs/tags/}"
         else
           cal=$(git log -1 --format=%cd --date=format:%y.%m)
-          last=$(git describe --tags --abbrev=0 --match "v[0-9]*" 2>/dev/null)
+          # A fork without tags has no last tag: count from the first commit.
+          # (The step runs under bash -e, so describe's exit 128 must not end it.)
+          last=$(git describe --tags --abbrev=0 --match "v[0-9]*" 2>/dev/null || true)
           n=$(git rev-list --count ${last:+$last..}HEAD)
           br_version="v${cal}-dev-${n}-g$(git rev-parse --short HEAD)"
         fi
