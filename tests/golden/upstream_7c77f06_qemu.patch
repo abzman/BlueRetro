@@ -1,0 +1,98 @@
+--- a/main/adapter/hid_parser.c
++++ b/main/adapter/hid_parser.c
+@@ -566,7 +566,7 @@
+                             reports[bt_data->base.pids->id][report_idx++] = wip_report[i];
+                             wip_report[i] = heap_caps_aligned_alloc(32, sizeof(struct hid_report), MALLOC_CAP_32BIT);
+                             if (wip_report[i] == NULL) {
+-                                return;
++                                goto free_wip;
+                             }
+                             memset(wip_report[i], 0, sizeof(struct hid_report));
+                         }
+@@ -621,7 +621,7 @@
+                 break;
+             default:
+                 printf("# Unknown HID marker: %02X\n", *--desc);
+-                return;
++                goto free_wip;
+         }
+     }
+     if (report_idx == 0 && wip_report[HID_IN]->id == 0) {
+@@ -643,15 +643,28 @@
+                 }
+                 hid_process_report(bt_data, wip_report[i]);
+                 reports[bt_data->base.pids->id][report_idx++] = wip_report[i];
++                wip_report[i] = NULL;
+             }
+         }
+     }
+     TESTS_CMDS_LOG("],\n");
++    /* The work reports left empty (most devices have no output report) used to leak here, ~800
++     * bytes each time a descriptor is parsed */
++    for (uint32_t i = 0; i < HID_TAG_CNT; i++) {
++        free(wip_report[i]);
++        wip_report[i] = NULL;
++    }
+ 
+     /* Free reports for non-generic devices */
+     if (bt_data->base.pids->type > BT_HID_GENERIC) {
+         hid_parser_free_reports(bt_data->base.pids->id);
+     }
++    return;
++
++free_wip:
++    for (uint32_t i = 0; i < HID_TAG_CNT; i++) {
++        free(wip_report[i]);
++    }
+ }
+ 
+ struct hid_report *hid_parser_get_report(int32_t dev_id, uint8_t report_id) {
+--- a/main/adapter/kb_monitor.c
++++ b/main/adapter/kb_monitor.c
+@@ -39,11 +39,20 @@
+             .arg = (void *)&kb_monitors[dev_id],
+             .name = "kbmon_typematic_cb"
+         };
+-        esp_timer_create(&tm_timer_args, &kb_monitors[dev_id].tm_timer_hdl);
++        /* Called again every time the output is set up anew (each controller that connects in
++         * keyboard mode): create the timer and queue once, they used to leak each time */
++        if (kb_monitors[dev_id].tm_timer_hdl == NULL) {
++            esp_timer_create(&tm_timer_args, &kb_monitors[dev_id].tm_timer_hdl);
++        }
++        else {
++            esp_timer_stop(kb_monitors[dev_id].tm_timer_hdl);
++        }
+         kb_monitors[dev_id].tm_state = 0;
+         kb_monitors[dev_id].dev_id = dev_id;
+         kb_monitors[dev_id].callback = callback;
+-        kb_monitors[dev_id].scq_hdl = queue_bss_init(32, 16);
++        if (kb_monitors[dev_id].scq_hdl == NULL) {
++            kb_monitors[dev_id].scq_hdl = queue_bss_init(32, 16);
++        }
+         if (kb_monitors[dev_id].scq_hdl == NULL) {
+             printf("# Failed to create KBMON:%ld ring buffer\n", dev_id);
+         }
+--- a/main/system/manager.c
++++ b/main/system/manager.c
+@@ -28,6 +28,7 @@
+ #include "system/fs.h"
+ #include "system/led.h"
+ #include "bare_metal_app_cpu.h"
++#include "tests/cmds.h"
+ #include "manager.h"
+ 
+ /* GPIO matrix signal index for one LEDC channel.
+@@ -638,6 +639,13 @@
+ }
+ 
+ void sys_mgr_cmd(uint8_t cmd) {
++#ifdef CONFIG_BLUERETRO_QEMU
++    /* No wired driver nor second core to restart under QEMU, and no flash to reset: report the
++     * command so the tests see a reset, power off or factory reset asked for, and do nothing */
++    printf("# %s %d (QEMU: ignored)\n", __FUNCTION__, cmd);
++    TESTS_CMDS_LOG("\"sys_mgr_cmd\": %d,\n", cmd);
++    return;
++#endif
+     if (cmd_q_hdl) {
+         UBaseType_t ret = xRingbufferSend(cmd_q_hdl, &cmd, sizeof(cmd), portMAX_DELAY);
+         if (ret != pdTRUE) {
