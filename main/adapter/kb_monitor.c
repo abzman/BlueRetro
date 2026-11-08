@@ -39,11 +39,22 @@ void kbmon_init(uint32_t dev_id, kbmon_id_to_code_t callback) {
             .arg = (void *)&kb_monitors[dev_id],
             .name = "kbmon_typematic_cb"
         };
-        esp_timer_create(&tm_timer_args, &kb_monitors[dev_id].tm_timer_hdl);
+        /* Called again every time the output is set up anew (each controller that connects in
+         * keyboard mode): create the timer and queue once, they used to leak each time. The queue
+         * is kept as is, not drained: the wired core may be reading it, and what is left in it is
+         * the previous keyboard's last codes, its key releases among them */
+        if (kb_monitors[dev_id].tm_timer_hdl == NULL) {
+            esp_timer_create(&tm_timer_args, &kb_monitors[dev_id].tm_timer_hdl);
+        }
+        else {
+            esp_timer_stop(kb_monitors[dev_id].tm_timer_hdl);
+        }
         kb_monitors[dev_id].tm_state = 0;
         kb_monitors[dev_id].dev_id = dev_id;
         kb_monitors[dev_id].callback = callback;
-        kb_monitors[dev_id].scq_hdl = queue_bss_init(32, 16);
+        if (kb_monitors[dev_id].scq_hdl == NULL) {
+            kb_monitors[dev_id].scq_hdl = queue_bss_init(32, 16);
+        }
         if (kb_monitors[dev_id].scq_hdl == NULL) {
             printf("# Failed to create KBMON:%ld ring buffer\n", dev_id);
         }
