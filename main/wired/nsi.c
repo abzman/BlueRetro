@@ -300,7 +300,8 @@ static void n64_kb_cmd_hdlr(uint8_t channel, uint8_t port, uint16_t item) {
                 n64_kb_leds(channel, leds & N64_KB_LEDS_HID);
                 break;
             }
-            /* Fallthrough: classic mode is an RND-001, which has no extended read */
+            /* Classic mode is an RND-001, which has no extended read */
+            __attribute__((fallthrough));
         default:
             /* 0x00 & 0xFF cmds goes here, corrupt cmd too! This help avoid ctrl detection error */
             const uint16_t id_be = sys_cpu_to_be16(N64_KB);
