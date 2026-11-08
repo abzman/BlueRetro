@@ -604,7 +604,9 @@ void hid_parser(struct bt_data *bt_data, uint8_t *data, uint32_t len) {
                         if (report_bit_offset[i] % 8) {
                             wip_report[i]->len++;
                         }
-                        if (wip_report[i]->len) {
+                        /* reports[] holds HID_MAX_REPORT: any more are dropped rather than
+                         * written past it */
+                        if (wip_report[i]->len && report_idx < HID_MAX_REPORT) {
                             if (report_idx) {
                                 TESTS_CMDS_LOG(",\n");
                             }
@@ -612,7 +614,7 @@ void hid_parser(struct bt_data *bt_data, uint8_t *data, uint32_t len) {
                             reports[bt_data->base.pids->id][report_idx++] = wip_report[i];
                             wip_report[i] = heap_caps_aligned_alloc(32, sizeof(struct hid_report), MALLOC_CAP_32BIT);
                             if (wip_report[i] == NULL) {
-                                return;
+                                goto free_wip;
                             }
                             memset(wip_report[i], 0, sizeof(struct hid_report));
                         }
@@ -674,7 +676,7 @@ void hid_parser(struct bt_data *bt_data, uint8_t *data, uint32_t len) {
                 break;
             default:
                 printf("# Unknown HID marker: %02X\n", *--desc);
-                return;
+                goto free_wip;
         }
     }
     if (report_idx == 0 && wip_report[HID_IN]->id == 0) {
@@ -690,16 +692,23 @@ void hid_parser(struct bt_data *bt_data, uint8_t *data, uint32_t len) {
             if (report_bit_offset[i] % 8) {
                 wip_report[i]->len++;
             }
-            if (wip_report[i]->len) {
+            if (wip_report[i]->len && report_idx < HID_MAX_REPORT) {
                 if (report_idx) {
                     TESTS_CMDS_LOG(",\n");
                 }
                 hid_process_report(bt_data, wip_report[i]);
                 reports[bt_data->base.pids->id][report_idx++] = wip_report[i];
+                wip_report[i] = NULL;
             }
         }
     }
     TESTS_CMDS_LOG("],\n");
+    /* The work reports left empty (most devices have no output report) used to leak here, ~800
+     * bytes each time a descriptor is parsed */
+    for (uint32_t i = 0; i < HID_TAG_CNT; i++) {
+        free(wip_report[i]);
+        wip_report[i] = NULL;
+    }
 
     /* A keyboard's media and system reports reach its kb_state; on any other device they stay
      * untyped and are let go */
@@ -719,6 +728,12 @@ void hid_parser(struct bt_data *bt_data, uint8_t *data, uint32_t len) {
     /* Free reports for non-generic devices */
     if (bt_data->base.pids->type > BT_HID_GENERIC && bt_data->base.pids->type != BT_SINPUT) {
         hid_parser_free_reports(bt_data->base.pids->id);
+    }
+    return;
+
+free_wip:
+    for (uint32_t i = 0; i < HID_TAG_CNT; i++) {
+        free(wip_report[i]);
     }
 }
 
