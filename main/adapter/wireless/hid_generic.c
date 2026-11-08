@@ -279,6 +279,7 @@ static void hid_kb_init(struct hid_report_meta *meta, struct hid_report *report,
     memset(map->axes_idx, -1, sizeof(map->axes_idx));
     meta->hid_btn_idx = -1;
     meta->kb_fn_idx = -1;
+    meta->kb_bitfield = 0;
 
     for (uint32_t i = 0; i < report->usage_cnt; i++) {
         if (report->usages[i].usage_page == USAGE_GEN_KEYBOARD
