@@ -449,11 +449,17 @@ struct ctrl_btn {
     uint32_t cnt_mask[32];
 };
 
+/* wireless_ctrl / wired_ctrl flags */
+/* An absolute pointer source (Wiimote IR) sees nothing to aim with: LX/LY hold the last position.
+ * Outputs that model aiming off the screen (a light gun's reload shot) report that instead. */
+#define CTRL_PTR_OFFSCREEN BIT(0)
+
 struct wireless_ctrl {
     const uint32_t *mask;
     const uint32_t *desc;
     struct ctrl_btn btns[4];
     struct ctrl_axis axes[ADAPTER_PS2_MAX_AXES];
+    uint32_t flags;
 };
 
 struct wired_ctrl {
@@ -465,6 +471,8 @@ struct wired_ctrl {
     struct ctrl_axis_wired axes[ADAPTER_PS2_MAX_AXES];
     /* the source keyboard's state, set only while a keyboard mode builds from it */
     const struct kb_state *kb;
+    /* CTRL_* flags of the source, set before each wired_from_generic() */
+    uint32_t flags;
 };
 
 struct generic_fb {

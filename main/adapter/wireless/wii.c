@@ -282,7 +282,9 @@ static int32_t wiimote_to_generic(struct bt_data *bt_data, struct wireless_ctrl 
             atomic_set_bit(&bt_data->base.flags[PAD], BT_INIT);
         }
 
-        wii_ir_ptr_update(ir, rpt->ir);
+        if (!wii_ir_ptr_update(ir, rpt->ir)) {
+            ctrl_data->flags |= CTRL_PTR_OFFSCREEN;
+        }
         wii_ir_ptr_get(ir, &axes[AXIS_LX], &axes[AXIS_LY]);
         wii_ir_ptr_delta(ir, &axes[AXIS_RX], &axes[AXIS_RY]);
 

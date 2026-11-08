@@ -463,6 +463,7 @@ void adapter_bridge(struct bt_data *bt_data) {
     uint32_t out_mask = 0;
 
     if (bt_data->base.pids->type != BT_NONE) {
+        ctrl_input->flags = 0;
         if (wireless_to_generic(bt_data, ctrl_input)) {
             /* Unsupported report */
             return;
@@ -536,6 +537,7 @@ void adapter_bridge(struct bt_data *bt_data) {
                     }
 
                     ctrl_output[i].index = i;
+                    ctrl_output[i].flags = ctrl_input->flags;
                     wired_from_generic(dev_mode, &ctrl_output[i], &wired_adapter.data[i]);
                 }
             }
