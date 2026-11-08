@@ -119,6 +119,14 @@ jobs:
         cat version.txt
         cp configs/${{ matrix.hw_version }}/${{ matrix.br_config }} sdkconfig
         BR_HW=${{ matrix.br_hw || format('_{0}', matrix.hw_version) }} BR_SYS=${{ matrix.br_sys || format('_{0}', matrix.br_config) }} idf.py reconfigure build
+    - name: Memory margin
+      shell: bash
+      run: |
+        . $IDF_PATH/export.sh
+        # Free IRAM, static DRAM and flash code size in the job summary. The wired drivers run
+        # from IRAM and the universal builds carry all of them: fail a board with under 2 KB left
+        # rather than let the next change overflow it.
+        python3 tools/mem_report.py build/BlueRetro*.elf --name "${{ matrix.hw_version }}_${{ matrix.br_config }}" --min-iram 2048
     - name: Stage artifact
       shell: bash
       run: |

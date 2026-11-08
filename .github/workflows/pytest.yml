@@ -8,8 +8,16 @@ on:
 
 jobs:
   test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # qemu: the suite with coverage. qemu_variants: the same suite on a build with the
+        # fork's build-time options on (N64 auto device identity, default accessories).
+        br_config: [qemu, qemu_variants]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The suite takes ~10 min on a runner, the upstream comparison (pytest_upstream_golden.py)
+    # a few more.
+    timeout-minutes: 35
     container:
       image: espressif/idf:release-v6.1
 
@@ -27,9 +35,9 @@ jobs:
         path: |
           build
           /root/.cache/ccache
-        key: idf6.1-qemu-${{ runner.os }}-${{ hashFiles('configs/dbg/qemu', 'main/**', 'components/**', 'CMakeLists.txt', 'sdkconfig.defaults*') }}
+        key: idf6.1-${{ matrix.br_config }}-${{ runner.os }}-${{ hashFiles(format('configs/dbg/{0}', matrix.br_config), 'main/**', 'components/**', 'CMakeLists.txt', 'sdkconfig.defaults*') }}
         restore-keys: |
-          idf6.1-qemu-${{ runner.os }}-
+          idf6.1-${{ matrix.br_config }}-${{ runner.os }}-
     - name: Setup test dependencies
       shell: bash
       run: |
@@ -46,9 +54,9 @@ jobs:
       run: |
         . $IDF_PATH/export.sh
         echo "br_version=$(git describe --always --tags --dirty)" >> $GITHUB_ENV
-        echo "$(git describe --always --tags --dirty) dbg qemu" | cut -c -31 > version.txt
+        echo "$(git describe --always --tags --dirty) dbg ${{ matrix.br_config }}" | cut -c -31 > version.txt
         cat version.txt
-        cp configs/dbg/qemu sdkconfig
+        cp configs/dbg/${{ matrix.br_config }} sdkconfig
         # ccache is off by default in IDF 6.1.
         idf.py --ccache build
         ccache -s
@@ -60,7 +68,7 @@ jobs:
         qemu-system-xtensa -machine esp32 -drive file=build/flash_image.bin,if=mtd,format=raw -serial file:serial_log.txt -serial file:gcov_data.gcfn -display none -nic user,model=open_eth,id=lo0,hostfwd=tcp:127.0.0.1:8001-:80 -daemonize
         pytest --timeout=120 --junit-xml=pytest_results.xml
     - name: Generate gcov report
-      if: always()
+      if: ${{ always() && matrix.br_config == 'qemu' }}
       shell: bash
       run: |
         . $IDF_PATH/export.sh
@@ -80,7 +88,7 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v7
       with:
-        name: logs
+        name: logs_${{ matrix.br_config }}
         path: |
           serial_log.txt
           coverage*
