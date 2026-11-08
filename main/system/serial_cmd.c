@@ -15,7 +15,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
-#include "esp_rom_uart.h"
+#include "esp_rom_serial_output.h"
 #include "adapter/adapter.h"
 #include "adapter/wired/n64_runtime.h"
 #include "bluetooth/host.h"
