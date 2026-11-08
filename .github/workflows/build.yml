@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   build:
-    if: ${{ (github.repository_owner == 'barrenechea') || (github.event_name == 'workflow_dispatch') }}
+    if: ${{ (github.repository_owner == 'abzman') || (github.event_name == 'workflow_dispatch') }}
     strategy:
       # The targets are independent, so one broken config should not hide the
       # state of the other 48. Without this, a single failure cancels the run and
