@@ -43,6 +43,12 @@ static uint8_t err_led_pin = ERR_LED_PIN;
 
 static void err_led_task(void *param) {
     while (1) {
+#ifdef CONFIG_BLUERETRO_QEMU
+        /* QEMU never raises the LEDC fade-end interrupt, so a started fade
+         * never ends and the next LEDC call waits on it forever: no pulse */
+        vTaskSuspend(NULL);
+        continue;
+#endif
         if (!atomic_test_bit(&led_flags, ERR_LED_SET)) {
             ledc_set_fade_time_and_start(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, hw_config.led_pulse_duty_max,
                 hw_config.led_pulse_fade_time_ms, LEDC_FADE_NO_WAIT);
