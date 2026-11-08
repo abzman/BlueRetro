@@ -185,6 +185,20 @@ def test_hid_keyboard_nkro_keys_mapping(blueretro):
         br_btns = [0, 0, 0, 0]
         br_btns[kb_id >> 5] = bit(kb_id & 0x1F)
         assert rsp['generic_input']['btns'] == br_btns
+def test_hid_keyboard_after_nkro_keyboard(blueretro):
+    ''' A boot keyboard on a slot an NKRO keyboard used before reads its key array again: the
+    bitfield layout used to stay with the slot and drop every key. '''
+    blueretro.send_name(DEVICE_NAME)
+    blueretro.send_hid_desc(NKRO_DESC)
+    blueretro.disconnect()
+    blueretro.connect()
+
+    blueretro.send_name(DEVICE_NAME)
+    blueretro.send_hid_desc(HID_DESC)
+    rsp = blueretro.send_hid_report('a101' '00' '00' '040000000000')
+    assert rsp['generic_input']['btns'] == [1, 0, 0, 0]   # KB_A is generic bit 0
+
+
 def test_hid_keyboard_iso_and_jis_keys(blueretro):
     ''' The ISO key left of Z (HID 0x64) and the JIS ro and yen keys (0x87, 0x89) reach their
     generic keys, KB_102ND, KB_RO and KB_YEN (generic bits 115-117); a usage no generic key

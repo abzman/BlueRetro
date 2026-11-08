@@ -74,3 +74,35 @@ def test_xbox_classic_axes_and_triggers_without_descriptor(blueretro):
     assert rsp['wireless_input']['axes'] == [0xFFFF, 0x0000, 0x0000, 0xFFFF]
     assert rsp['wireless_input']['triggers'] == [1023, 512]
     assert rsp['generic_input']['axes'] == [32767, -32767, -32768, 32768, 1023, 512]
+
+
+def test_xbox_classic_rumble_without_descriptor(blueretro):
+    ''' Console rumble goes out as the Xbox's output report 0x03: all motors enabled, the strong
+    and weak motors at full, then off. '''
+    blueretro.send_name(DEVICE_NAME)
+    for _ in range(3):
+        blueretro.send_hid_report(make_report())
+
+    rsp = blueretro.send_fb(0, 1, '01')
+    assert rsp['fb_changed'] == 1
+    # After the L2CAP header: HIDP output, report 0x03, enable mask, LT, RT, strong, weak
+    assert rsp['bt_tx0'][9:16] == [0xA2, 0x03, 0x0F, 0, 0, 255, 255]
+    rsp = blueretro.send_fb(0, 1, '00')
+    assert rsp['bt_tx0'][9:16] == [0xA2, 0x03, 0x0F, 0, 0, 0, 0]
+
+
+def test_xbox_classic_after_descriptor_device(blueretro):
+    ''' A slot a device with a descriptor used before still decodes the descriptor-less layout:
+    the previous device's descriptor goes when the slot is reset. '''
+    from pytest_hid_controller_a import HID_DESC
+    blueretro.send_name('HID Generic')
+    blueretro.send_hid_desc(HID_DESC)
+    blueretro.disconnect()
+    blueretro.connect()
+
+    blueretro.send_name(DEVICE_NAME)
+    for _ in range(2):
+        blueretro.send_hid_report(make_report())
+    rsp = blueretro.send_hid_report(make_report(buttons=0x01))
+    assert rsp['wireless_input']['btns'] == 1
+    assert rsp['generic_input']['btns'][0] == bit(pad.RB_DOWN)
