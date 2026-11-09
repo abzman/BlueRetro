@@ -42,6 +42,9 @@ jobs:
             br_config: gamecube_ibluecontrolmod_safe
             br_hw: _iblue
             br_sys: _gc_safe
+          # OGX-Mini Picos over I2C: a plain ESP32 board, so hw1 only.
+          - hw_version: hw1
+            br_config: ogx_mini
           # RetroScaler adapters (hw1 only), reconstructed from their binaries.
           - hw_version: hw1
             br_config: 3do_retroscaler

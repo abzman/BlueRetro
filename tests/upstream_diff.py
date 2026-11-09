@@ -34,7 +34,9 @@ DEVICES = [
     ('pytest_xbox_ble_controller', 'HID_DESC', None),
     ('pytest_xiaomi_mi', 'HID_DESC', None),
 ]
-SYSTEMS = [s for s in system if s != system.WIRED_AUTO]
+# Upstream (7c77f06) ends at SEA_BOARD: the systems this fork adds have nothing to compare to
+FORK_SYSTEMS = (system.OGX_MINI,)
+SYSTEMS = [s for s in system if s != system.WIRED_AUTO and s not in FORK_SYSTEMS]
 MODES = list(dev_mode)
 KEPT = ('wireless_input', 'generic_input', 'mapped_input', 'wired_output')
 REPORTS_PER_DEVICE = 6

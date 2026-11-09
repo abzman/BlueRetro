@@ -194,6 +194,12 @@ menu "BlueRetro"
             help
                 Select this to support only SEA Board.
 
+        config BLUERETRO_SYSTEM_OGX_MINI
+            bool "OGX-Mini"
+            help
+                Select this to support only OGX-Mini Picos over I2C (original Xbox,
+                XInput, PS3 or Switch USB output). See docs/ogx_mini.md.
+
     endchoice
 
     config BLUERETRO_HW_IBLUECONTROL

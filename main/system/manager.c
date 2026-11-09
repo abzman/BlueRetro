@@ -859,6 +859,10 @@ void sys_mgr_init(uint32_t package) {
         case DC:
             hw_config.port_cnt = 4;
             break;
+        case OGX_MINI:
+            /* One Pico per output, at I2C 0x01 to 0x04 */
+            hw_config.port_cnt = 4;
+            break;
         case GC:
             hw_config.port_cnt = 4;
 #ifdef CONFIG_BLUERETRO_HW2_IBLUECONTROLMOD

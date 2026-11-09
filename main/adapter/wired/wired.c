@@ -24,6 +24,7 @@
 #include "parallel_2p.h"
 #include "sea.h"
 #include "wii.h"
+#include "ogxmini.h"
 #include "adapter/config.h"
 #include "wired.h"
 
@@ -52,6 +53,7 @@ static from_generic_t from_generic_func[WIRED_MAX] = {
     para_1p_from_generic, /* PARALLEL_1P_OD */
     para_2p_from_generic, /* PARALLEL_2P_OD */
     sea_from_generic, /* SEA_BOARD */
+    ogxmini_from_generic, /* OGX_MINI */
 };
 
 static fb_to_generic_t fb_to_generic_func[WIRED_MAX] = {
@@ -79,6 +81,7 @@ static fb_to_generic_t fb_to_generic_func[WIRED_MAX] = {
     NULL, /* PARALLEL_1P_OD */
     NULL, /* PARALLEL_2P_OD */
     NULL, /* SEA_BOARD */
+    ogxmini_fb_to_generic, /* OGX_MINI */
 };
 
 static meta_init_t meta_init_func[WIRED_MAX] = {
@@ -106,6 +109,7 @@ static meta_init_t meta_init_func[WIRED_MAX] = {
     para_1p_meta_init, /* PARALLEL_1P_OD */
     para_2p_meta_init, /* PARALLEL_2P_OD */
     sea_meta_init, /* SEA_BOARD */
+    ogxmini_meta_init, /* OGX_MINI */
 };
 
 static DRAM_ATTR buffer_init_t buffer_init_func[WIRED_MAX] = {
@@ -133,6 +137,7 @@ static DRAM_ATTR buffer_init_t buffer_init_func[WIRED_MAX] = {
     para_1p_init_buffer, /* PARALLEL_1P_OD */
     para_2p_init_buffer, /* PARALLEL_2P_OD */
     sea_init_buffer, /* SEA_BOARD */
+    ogxmini_init_buffer, /* OGX_MINI */
 };
 
 int32_t wired_meta_init(struct wired_ctrl *ctrl_data) {
@@ -151,7 +156,8 @@ int32_t wired_meta_init(struct wired_ctrl *ctrl_data) {
 uint32_t wired_ptr_caps(uint32_t out_idx) {
     uint32_t caps = 0;
 
-    if (out_idx >= WIRED_MAX_DEV || wired_adapter.system_id == WIRED_AUTO) {
+    /* OGX-Mini: every output mode is a gamepad, the mode only picks the Pico's USB device */
+    if (out_idx >= WIRED_MAX_DEV || wired_adapter.system_id == WIRED_AUTO || wired_adapter.system_id == OGX_MINI) {
         return 0;
     }
 
