@@ -49,6 +49,9 @@ jobs:
         # Pin the pytest major: 9.x renamed -junitxml to --junit-xml, so an
         # unbounded install can break the flag below on a new major.
         pip install "pytest>=9,<10" pytest-timeout gcovr websocket-client numpy
+        # A host C compiler: pytest_beam_timing.py builds the Super Scope's timing code for the
+        # host. Without one it would skip, so make sure.
+        command -v cc || { apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev; }
     - name: Build with ESP-IDF
       shell: bash
       run: |

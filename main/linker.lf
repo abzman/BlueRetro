@@ -20,6 +20,7 @@ entries:
     ps_spi (noflash)
     real_spi (noflash)
     snes_spi (noflash)
+    beam_timing (noflash)
     sega_io (noflash)
     pce_io (noflash)
     jag_io (noflash)

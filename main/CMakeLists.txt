@@ -105,6 +105,7 @@ set(srcs
     "wired/ps_spi.c"
     "wired/real_spi.c"
     "wired/snes_spi.c"
+    "wired/beam_timing.c"
     "wired/jag_io.c"
     "wired/sea_io.c"
     "wired/wii_i2c.c"
