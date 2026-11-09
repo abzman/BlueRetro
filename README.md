@@ -154,6 +154,15 @@ console times against the beam (Zapper, Menacer, Justifier, ...) need the
 timing on the console's side, as the Super Scope does; `beam_timing.c` is a
 start for that.
 
+## Original Xbox through an OGX-Mini
+
+An [OGX-Mini](https://github.com/wiredopposite/OGX-Mini) Pico wired to the ESP32's I2C pins
+(GPIO21/22) gives BlueRetro a USB output: original Xbox, XInput, PS3 or Switch, picked by the
+output's mode. The `hw1/ogx_mini` build talks to an unmodified Pico running OGX-Mini's ESP32
+Bluepad32 I2C firmware; rumble goes back to the controller with the Rumble accessory set, and a
+DualShock 3's pressure buttons keep their pressure. See [docs/ogx_mini.md](docs/ogx_mini.md) for
+the wiring and settings.
+
 ## N64 keyboard and commands
 
 From bherdm/BlueRetroForever. Set an N64 output to **Keyboard** mode and a

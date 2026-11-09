@@ -26,6 +26,7 @@ Besides upstream's tests, the suite checks the following:
 | PS1/PS2 GunCon from a Wiimote or a gamepad | `pytest_psx_guncon.py` |
 | SNES Super Scope: buttons and aim handed to the driver | `pytest_snes_super_scope.py` |
 | Super Scope timing (frame tracking from the polls) and report, on the host against a model of the SNES | `pytest_beam_timing.py` |
+| OGX-Mini pad from a DS3 and an Xbox pad, rumble gating; its packets and turbo on the host against OGX-Mini's structs | `pytest_ogxmini.py` |
 | N64 mouse, and a pad driven by a mouse | `pytest_n64_mouse.py` |
 | Commands from a console's program (0x7B) | `pytest_console_cmd.py` |
 | Saturn Mission Stick and Arcade Racer | `pytest_saturn_mission_racer.py` |
@@ -36,7 +37,7 @@ Besides upstream's tests, the suite checks the following:
 | **Everything else against upstream** | `pytest_upstream_golden.py` |
 
 `pytest_upstream_golden.py` feeds the 11 HID descriptors the tests carry through all 23 wired
-systems and 4 output modes: 1012 combinations with 8 reports each. Every stage (decoded, mapped,
+systems upstream has (not this fork's OGX-Mini) and 4 output modes: 1012 combinations with 8 reports each. Every stage (decoded, mapped,
 wired) must equal what upstream 7c77f06 produced (`tests/golden/`), except for the changes the
 fork made on purpose. Those are listed in the test, each with its reason. To re-record the golden
 file, see the header of `tests/upstream_diff.py`.
