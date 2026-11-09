@@ -1031,7 +1031,7 @@ static void hid_pad_to_generic(struct bt_data *bt_data, struct wireless_ctrl *ct
             }
 
             if (!atomic_test_bit(&bt_data->base.flags[PAD], BT_INIT)) {
-                bt_data->base.axes_cal[i] = -(value  - ctrl_meta[i].neutral);
+                bt_data->base.axes_cal[i] = adapter_axes_calib_en() ? -(value  - ctrl_meta[i].neutral) : 0;
                 if (i) {
                     bt_mon_log(false, ", ");
                 }

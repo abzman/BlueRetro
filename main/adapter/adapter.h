@@ -622,6 +622,13 @@ extern const uint32_t generic_btns_mask[32];
 extern struct bt_adapter bt_adapter;
 extern struct wired_adapter wired_adapter;
 
+/* Center calibration of a controller's axes, from its first report: off on OGX-Mini, where the
+ * console and its games bring their own dead zones, so a stick or a pressure button held while
+ * the controller connects does not stay off center (as BRX has it for the Xbox) */
+static inline bool adapter_axes_calib_en(void) {
+    return wired_adapter.system_id != OGX_MINI;
+}
+
 uint32_t adapter_get_out_mask(uint8_t dev_id);
 int32_t btn_id_to_axis(uint8_t btn_id);
 uint8_t btn_is_axis(uint8_t dst_id, uint8_t dst_btn_id);

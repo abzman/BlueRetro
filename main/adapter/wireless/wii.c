@@ -341,7 +341,7 @@ static int32_t wiin_to_generic(struct bt_data *bt_data, struct wireless_ctrl *ct
         for (uint32_t i = 0; i < NUNCHUCK_AXES_MAX; i++) {
             meta[i].abs_max *= MAX_PULL_BACK;
             meta[i].abs_min *= MAX_PULL_BACK;
-            bt_data->base.axes_cal[i] = -(map->axes[i] - wiin_axes_meta[i].neutral);
+            bt_data->base.axes_cal[i] = adapter_axes_calib_en() ? -(map->axes[i] - wiin_axes_meta[i].neutral) : 0;
             if (i) {
                 bt_mon_log(false, ", ");
             }
@@ -400,7 +400,7 @@ static int32_t wiic_to_generic(struct bt_data *bt_data, struct wireless_ctrl *ct
         for (uint32_t i = 0; i < ADAPTER_MAX_AXES; i++) {
             meta[i].abs_max *= MAX_PULL_BACK;
             meta[i].abs_min *= MAX_PULL_BACK;
-            bt_data->base.axes_cal[i] = -(axes[i] - wiic_axes_meta[i].neutral);
+            bt_data->base.axes_cal[i] = adapter_axes_calib_en() ? -(axes[i] - wiic_axes_meta[i].neutral) : 0;
             if (i) {
                 bt_mon_log(false, ", ");
             }
@@ -464,7 +464,7 @@ static int32_t wiic_8bit_to_generic(struct bt_data *bt_data, struct wireless_ctr
         for (uint32_t i = 0; i < ADAPTER_MAX_AXES; i++) {
             meta[i].abs_max *= MAX_PULL_BACK;
             meta[i].abs_min *= MAX_PULL_BACK;
-            bt_data->base.axes_cal[i] = -(map->axes[wiic_8bit_axes_idx[i]] - wiic_8bit_axes_meta[i].neutral);
+            bt_data->base.axes_cal[i] = adapter_axes_calib_en() ? -(map->axes[wiic_8bit_axes_idx[i]] - wiic_8bit_axes_meta[i].neutral) : 0;
             if (i) {
                 bt_mon_log(false, ", ");
             }
@@ -519,7 +519,7 @@ static int32_t wiiu_to_generic(struct bt_data *bt_data, struct wireless_ctrl *ct
         for (uint32_t i = 0; i < WIIU_AXES_MAX; i++) {
             meta[i].abs_max *= MAX_PULL_BACK;
             meta[i].abs_min *= MAX_PULL_BACK;
-            bt_data->base.axes_cal[i] = -(map->axes[wiiu_axes_idx[i]] - wiiu_axes_meta[i].neutral);
+            bt_data->base.axes_cal[i] = adapter_axes_calib_en() ? -(map->axes[wiiu_axes_idx[i]] - wiiu_axes_meta[i].neutral) : 0;
             if (i) {
                 bt_mon_log(false, ", ");
             }

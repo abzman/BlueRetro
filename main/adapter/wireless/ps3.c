@@ -100,7 +100,7 @@ int32_t ps3_to_generic(struct bt_data *bt_data, struct wireless_ctrl *ctrl_data)
     ctrl_data->mask = (uint32_t *)ps3_mask;
     ctrl_data->desc = (uint32_t *)ps3_desc;
 
-    if (wired_adapter.system_id == PSX || wired_adapter.system_id == PS2) {
+    if (wired_adapter.system_id == PSX || wired_adapter.system_id == PS2 || wired_adapter.system_id == OGX_MINI) {
         ctrl_data->desc = (uint32_t *)ps3_pressure_desc;
         axes_cnt = ADAPTER_PS2_MAX_AXES;
         i = 20;
@@ -118,7 +118,7 @@ int32_t ps3_to_generic(struct bt_data *bt_data, struct wireless_ctrl *ctrl_data)
         for (uint32_t i = 0; i < ADAPTER_PS2_MAX_AXES; i++) {
             meta[i].abs_max *= MAX_PULL_BACK;
             meta[i].abs_min *= MAX_PULL_BACK;
-            bt_data->base.axes_cal[i] = -(map->axes[ps3_axes_idx[i]] - ps3_axes_meta[i].neutral);
+            bt_data->base.axes_cal[i] = adapter_axes_calib_en() ? -(map->axes[ps3_axes_idx[i]] - ps3_axes_meta[i].neutral) : 0;
             if (i) {
                 bt_mon_log(false, ", ");
             }

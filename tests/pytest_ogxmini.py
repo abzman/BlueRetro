@@ -1,5 +1,5 @@
-''' OGX-Mini output: the Pico's SET_PAD packet built from each controller (255 for a digital
-press), its rumble passed back to the controller only with
+''' OGX-Mini output: the Pico's SET_PAD packet built from each controller (pressure where the
+controller has it, 255 for a digital press), its rumble passed back to the controller only with
 the Rumble accessory, and the packet code itself on the host (layout against OGX-Mini's own
 structs, turbo, PacketOut). Nothing in QEMU runs the I2C driver. '''
 import os
@@ -77,6 +77,33 @@ def test_ogxmini_at_rest(ds3):
     assert o['analog'] == [0] * 10
 
 
+@pytest.mark.parametrize(('btn', 'axis', 'field', 'value', 'analog'), [
+    (ps3.X, 'x', 'btns', BTN_A, AN_A),
+    (ps3.C, 'c', 'btns', BTN_B, AN_B),
+    (ps3.S, 's', 'btns', BTN_X, AN_X),
+    (ps3.T, 't', 'btns', BTN_Y, AN_Y),
+    (ps3.L1, 'l1', 'btns', BTN_LB, AN_LB),
+    (ps3.R1, 'r1', 'btns', BTN_RB, AN_RB),
+    (ps3.D_UP, 'up', 'dpad', DPAD_UP, AN_UP),
+    (ps3.D_DOWN, 'down', 'dpad', DPAD_DOWN, AN_DOWN),
+    (ps3.D_LEFT, 'left', 'dpad', DPAD_LEFT, AN_LEFT),
+    (ps3.D_RIGHT, 'right', 'dpad', DPAD_RIGHT, AN_RIGHT),
+])
+def test_ogxmini_ds3_pressure(ds3, btn, axis, field, value, analog):
+    ''' A DS3's pressure goes through: a light press is the button with its pressure, a full
+    press 255 (give or take the source's pull back) '''
+    o = out(ds3.send_hid_report(ds3_report(1 << btn, **{axis: 0x40})))
+    assert o[field] == value
+    assert 0x38 <= o['analog'][analog] <= 0x48
+    assert sum(o['analog']) == o['analog'][analog]
+
+    o = out(ds3.send_hid_report(ds3_report(1 << btn, **{axis: 0xFF})))
+    assert o[field] == value and o['analog'][analog] == 255
+
+    o = out(ds3.send_hid_report(ds3_report()))
+    assert o[field] == 0 and o['analog'][analog] == 0
+
+
 @pytest.mark.parametrize(('btn', 'value'), [
     (ps3.START, BTN_START), (ps3.SELECT, BTN_BACK), (ps3.PS, BTN_SYS),
     (ps3.L3, BTN_L3), (ps3.R3, BTN_R3),
@@ -103,6 +130,18 @@ def test_ogxmini_digital_press_reads_255(xbox):
     assert o['dpad'] == DPAD_UP and o['analog'][AN_UP] == 255 and o['analog'][AN_A] == 0
     o = out(xbox.send_hid_report(xbox_report(triggers=(1023, 0))))
     assert o['triggers'] == [255, 0]
+
+
+def test_ogxmini_no_center_calibration(blueretro_dut):
+    ''' A stick held while the controller connects stays where it is: no calibration to its
+    first report on OGX-Mini (games and the console bring their own dead zones). '''
+    held = ds3_report(lx=0xC0)
+    dut = connect(blueretro_dut, DS3, first=held)
+    try:
+        assert out(dut.send_hid_report(held))['axes'][0] > 10000
+        assert out(dut.send_hid_report(ds3_report()))['axes'][0] == 0
+    finally:
+        dut.disconnect()
 
 
 @pytest.mark.parametrize('xbox', [ACC_RUMBLE, ACC_BOTH], indirect=True)
