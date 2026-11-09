@@ -169,6 +169,12 @@ uint32_t wired_ptr_caps(uint32_t out_idx) {
                 caps |= WIRED_PTR_ABS;
             }
             break;
+        case SNES:
+            /* Super Scope: Gamepad Alt on the 2nd port */
+            if (npiso_is_scope(out_idx)) {
+                caps = WIRED_PTR_ABS;
+            }
+            break;
         case PSX:
         case PS2:
             /* GunCon: Mouse mode with the rumble accessory */

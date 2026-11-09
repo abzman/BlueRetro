@@ -24,6 +24,8 @@ Besides upstream's tests, the suite checks the following:
 | Wiimote IR as a pointer and as a mouse | `pytest_wiimote_ir_controller.py` |
 | CD-i pointer and mouse | `pytest_cdi_pointer.py` |
 | PS1/PS2 GunCon from a Wiimote or a gamepad | `pytest_psx_guncon.py` |
+| SNES Super Scope: buttons and aim handed to the driver | `pytest_snes_super_scope.py` |
+| Super Scope timing (frame tracking from the polls) and report, on the host against a model of the SNES | `pytest_beam_timing.py` |
 | N64 mouse, and a pad driven by a mouse | `pytest_n64_mouse.py` |
 | Commands from a console's program (0x7B) | `pytest_console_cmd.py` |
 | Saturn Mission Stick and Arcade Racer | `pytest_saturn_mission_racer.py` |
@@ -60,6 +62,10 @@ started. Check these on real hardware first:
 - Saturn: Mission Stick, Arcade Racer, keyboard lock keys, multitap mouse and keyboard.
 - Genesis: XBAND keyboard, 6-button pad.
 - 3DO: arcade pad.
+- SNES Super Scope (GamePad Alt, port 2) with a Wiimote: the console sees a scope, the
+  sight calibration of Super Scope 6 lands where you aim, and stays there over a few minutes.
+  On a scope or logic analyser: pin 6 goes low for 2 us, once a frame while Fire is held, at
+  the same point of the picture. Try NTSC and PAL, and a game that reads the pad by hand.
 - PS1 GunCon (Mouse + Rumble accessory) with a Wiimote: the console sees a GunCon (ID 0x63),
   the game's calibration lands on the sight, and a shot with the sensor bar out of view reloads.
   Time Crisis, Point Blank, on NTSC and PAL.

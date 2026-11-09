@@ -81,6 +81,16 @@ static DRAM_ATTR const struct ctrl_meta npiso_axes_meta[ADAPTER_MAX_AXES] =
     {.size_min = 0, .size_max = 255, .neutral = 0, .abs_max = 255, .abs_min = 0x00},
 };
 
+static DRAM_ATTR const struct ctrl_meta npiso_scope_axes_meta[ADAPTER_MAX_AXES] =
+{
+    {.size_min = NPISO_SCOPE_PTR_MIN, .size_max = NPISO_SCOPE_PTR_MAX, .neutral = 0x00, .abs_max = NPISO_SCOPE_PTR_MAX, .abs_min = -NPISO_SCOPE_PTR_MIN},
+    {.size_min = NPISO_SCOPE_PTR_MIN, .size_max = NPISO_SCOPE_PTR_MAX, .neutral = 0x00, .abs_max = NPISO_SCOPE_PTR_MAX, .abs_min = -NPISO_SCOPE_PTR_MIN, .polarity = 1},
+    {.size_min = NPISO_SCOPE_PTR_MIN, .size_max = NPISO_SCOPE_PTR_MAX, .neutral = 0x00, .abs_max = NPISO_SCOPE_PTR_MAX, .abs_min = -NPISO_SCOPE_PTR_MIN},
+    {.size_min = NPISO_SCOPE_PTR_MIN, .size_max = NPISO_SCOPE_PTR_MAX, .neutral = 0x00, .abs_max = NPISO_SCOPE_PTR_MAX, .abs_min = -NPISO_SCOPE_PTR_MIN, .polarity = 1},
+    {.size_min = NPISO_SCOPE_PTR_MIN, .size_max = NPISO_SCOPE_PTR_MAX, .neutral = 0x00, .abs_max = NPISO_SCOPE_PTR_MAX, .abs_min = -NPISO_SCOPE_PTR_MIN},
+    {.size_min = NPISO_SCOPE_PTR_MIN, .size_max = NPISO_SCOPE_PTR_MAX, .neutral = 0x00, .abs_max = NPISO_SCOPE_PTR_MAX, .abs_min = -NPISO_SCOPE_PTR_MIN},
+};
+
 struct npiso_map {
     uint16_t buttons;
     uint8_t axes[6];
@@ -121,6 +131,23 @@ static DRAM_ATTR const uint32_t npiso_btns_mask[32] = {
     BIT(NPISO_L), BIT(NPISO_L), 0, 0,
     BIT(NPISO_R), BIT(NPISO_R), 0, 0,
 };
+
+/* Super Scope: LX/LY is the aim (WIRED_PTR_ABS). A Wiimote fires with B, A is Cursor, + and 2
+ * Pause, - and 1 flip the turbo switch. A mouse: left Fire, right Cursor, middle Pause. Any D-pad
+ * direction held aims off the screen, as does losing the sensor bar. */
+static const uint32_t npiso_scope_mask[4] = {0x193F0F0F, 0x00000000, 0x00000000, BR_COMBO_MASK};
+static const uint32_t npiso_scope_desc[4] = {0x0000000F, 0x00000000, 0x00000000, 0x00000000};
+static const uint8_t npiso_scope_btns_mask[32] = {
+    0, 0, 0, 0,
+    0, 0, 0, 0,
+    0, 0, 0, 0,
+    0, 0, 0, 0,
+    NPISO_SCOPE_TURBO, NPISO_SCOPE_FIRE, NPISO_SCOPE_PAUSE, NPISO_SCOPE_CURSOR,
+    NPISO_SCOPE_PAUSE, NPISO_SCOPE_TURBO, 0, 0,
+    NPISO_SCOPE_CURSOR, 0, 0, NPISO_SCOPE_PAUSE,
+    NPISO_SCOPE_FIRE, 0, 0, 0,
+};
+#define NPISO_SCOPE_OFFSCREEN_BTNS 0x00000F00   /* generic D-pad */
 
 static const uint32_t npiso_vb_mask[4] = {0xBBF50FF0, 0x00000000, 0x00000000, BR_COMBO_MASK};
 static const uint32_t npiso_vb_desc[4] = {0x00000000, 0x00000000, 0x00000000, 0x00000000};
@@ -230,6 +257,17 @@ void IRAM_ATTR npiso_init_buffer(int32_t dev_mode, struct wired_data *wired_data
             }
             break;
         }
+        case DEV_PAD_ALT:
+            if (npiso_is_scope(wired_data->index)) {
+                struct npiso_scope_map *map = (struct npiso_scope_map *)wired_data->output;
+
+                memset(wired_data->output, 0, sizeof(*map));
+                memset(wired_data->output_mask, 0, sizeof(*map));
+                map->held = NPISO_SCOPE_OFFSCREEN;
+                map->xy = (NPISO_SCOPE_W / 2) | ((NPISO_SCOPE_H / 2) << 16);
+                break;
+            }
+        __attribute__ ((fallthrough));
         default:
         {
             struct npiso_map *map = (struct npiso_map *)wired_data->output;
@@ -271,6 +309,14 @@ void npiso_meta_init(struct wired_ctrl *ctrl_data) {
                         ctrl_data[i].axes[j].meta = &npiso_trackball_axes_meta[j];
                     }
                     break;
+                case DEV_PAD_ALT:
+                    if (npiso_is_scope(i)) {
+                        ctrl_data[i].mask = npiso_scope_mask;
+                        ctrl_data[i].desc = npiso_scope_desc;
+                        ctrl_data[i].axes[j].meta = &npiso_scope_axes_meta[j];
+                        break;
+                    }
+                __attribute__ ((fallthrough));
                 default:
                     if (wired_adapter.system_id == VBOY) {
                         ctrl_data[i].mask = npiso_vb_mask;
@@ -428,6 +474,52 @@ static void npiso_trackball_from_generic(struct wired_ctrl *ctrl_data, struct wi
     memcpy(wired_data->output, (void *)&map_tmp, sizeof(map_tmp) - 8);
 }
 
+/* [NPISO_SCOPE_PTR_MIN, NPISO_SCOPE_PTR_MAX] onto [0, size) */
+static uint32_t npiso_scope_scale(int32_t v, uint32_t size) {
+    if (v < NPISO_SCOPE_PTR_MIN) {
+        v = NPISO_SCOPE_PTR_MIN;
+    }
+    else if (v > NPISO_SCOPE_PTR_MAX) {
+        v = NPISO_SCOPE_PTR_MAX;
+    }
+    return ((uint32_t)(v - NPISO_SCOPE_PTR_MIN) * size) / (NPISO_SCOPE_PTR_MAX - NPISO_SCOPE_PTR_MIN + 1);
+}
+
+static void npiso_scope_from_generic(struct wired_ctrl *ctrl_data, struct wired_data *wired_data) {
+    struct npiso_scope_map map_tmp;
+    uint8_t held = 0;
+
+    memcpy((void *)&map_tmp, wired_data->output, sizeof(map_tmp));
+
+    /* Several sources share each gun button: any of them held holds it */
+    for (uint32_t i = 0; i < ARRAY_SIZE(generic_btns_mask); i++) {
+        if ((ctrl_data->map_mask[0] & BIT(i)) && (ctrl_data->btns[0].value & generic_btns_mask[i])) {
+            held |= npiso_scope_btns_mask[i];
+            if (BIT(i) & NPISO_SCOPE_OFFSCREEN_BTNS) {
+                held |= NPISO_SCOPE_OFFSCREEN;
+            }
+        }
+    }
+    if (ctrl_data->flags & CTRL_PTR_OFFSCREEN) {
+        held |= NPISO_SCOPE_OFFSCREEN;
+    }
+    map_tmp.held = held;
+
+    if (ctrl_data->map_mask[0] & (axis_to_btn_mask(AXIS_LX) | axis_to_btn_mask(AXIS_LY)) & npiso_scope_desc[0]) {
+        /* LY's meta has polarity set: the adapter hands it over growing down the screen */
+        uint32_t x = npiso_scope_scale(ctrl_data->axes[AXIS_LX].value, NPISO_SCOPE_W);
+        uint32_t y = npiso_scope_scale(ctrl_data->axes[AXIS_LY].value, NPISO_SCOPE_H);
+        map_tmp.xy = x | (y << 16);
+    }
+
+    memcpy(wired_data->output, (void *)&map_tmp, sizeof(map_tmp));
+
+    TESTS_CMDS_LOG("\"wired_output\": {\"held\": %d, \"x\": %lu, \"y\": %lu},\n",
+        map_tmp.held, map_tmp.xy & 0xFFFF, map_tmp.xy >> 16);
+    BT_MON_LOG("\"wired_output\": {\"held\": %02X, \"x\": %lu, \"y\": %lu},\n",
+        map_tmp.held, map_tmp.xy & 0xFFFF, map_tmp.xy >> 16);
+}
+
 static void npiso_kb_from_generic(struct wired_ctrl *ctrl_data, struct wired_data *wired_data) {
     struct npiso_kb_map map_tmp = {0};
 
@@ -458,6 +550,12 @@ void npiso_from_generic(int32_t dev_mode, struct wired_ctrl *ctrl_data, struct w
                 npiso_trackball_from_generic(ctrl_data, wired_data);
             }
             break;
+        case DEV_PAD_ALT:
+            if (npiso_is_scope(ctrl_data->index)) {
+                npiso_scope_from_generic(ctrl_data, wired_data);
+                break;
+            }
+        __attribute__ ((fallthrough));
         default:
             npiso_ctrl_from_generic(ctrl_data, wired_data);
             if (wired_adapter.system_id == VBOY) {

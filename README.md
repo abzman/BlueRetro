@@ -104,10 +104,11 @@ Wiimote is mapped to uses a pointer, so it costs no battery otherwise.
 | **Mouse** on any system with mouse support (SNES, PS1/PS2, N64, Saturn, Genesis, Dreamcast, PCE, PC-FX, 3DO, CD-i, ...) | Mouse: aiming moves the cursor | B = left click, A = right click |
 | **GamePad Alt** on CD-i | Absolute coordinate device (Peacekeeper light gun) | B / 1 = button 1, A / 2 = button 2 |
 | **Mouse** + **Rumble** accessory on PS1/PS2 (**Both** accessories keeps the memory card) | Namco GunCon (Time Crisis, Point Blank, Die Hard Trilogy 2, ...) | B = trigger, A / + = A, 1 / 2 / - = B; D-pad held or no sensor bar in view = aiming off the screen (the reload shot) |
+| **GamePad Alt** on the SNES's **2nd port** (experimental) | Super Scope (Super Scope 6, Yoshi's Safari, Battle Clash, T2: The Arcade Game, ...) | B = Fire, A = Cursor, + / 2 = Pause, - / 1 = flip the turbo switch; D-pad held or no sensor bar in view = off the screen |
 
 Tips:
 
-* For absolute outputs (CD-i GamePad Alt, GunCon), set the deadzone of the left stick
+* For absolute outputs (CD-i GamePad Alt, GunCon, Super Scope), set the deadzone of the left stick
   X/Y mappings to 0 % in the advanced mapping config, otherwise the pointer
   sticks around screen center. Then run the game's own gun calibration.
 * Mouse speed follows the mapping's scale (max %) of the right stick X/Y.
@@ -120,14 +121,38 @@ Tips:
 * With a Nunchuk or other extension plugged in, the Wiimote behaves as
   before and the camera stays off.
 
+The Super Scope is experimental: it has not been tried on a console yet. A
+real scope pulls the port's pin 6 (IOBit) low when its sensor sees the beam,
+and the SNES latches where the beam was. The adapter can't see the picture,
+so it works out when the beam will be under the aim from the polls: they
+come once a frame, at a point that moves around within a known window, and
+the adapter tracks the frame from the earliest of them
+(`main/wired/beam_timing.c`). That takes about 3 seconds after the game
+starts reading the port. Things to know:
+
+* It only works on the 2nd port: the 1st port's pin 6 doesn't reach the
+  latch. GamePad Alt on the 1st port is a plain pad.
+* The light pulse only goes out while Fire or Cursor is held on the screen,
+  as with the real scope. Run the game's sight calibration first.
+* In a model of the SNES's timing (`tests/pytest_beam_timing.py`) the aim
+  stays within about 2 dots of the beam on NTSC and PAL. A real console may
+  differ.
+* A game that reads the port several times a frame at varying points, or
+  doesn't read it every frame, may never be tracked; the scope then reports
+  its buttons but never hits.
+* Pin 6 has to reach the console both ways. If your adapter's port wiring
+  only lets it in (as the SNES rumble protocol needs), the pulse can't go
+  out.
+
 Adding another absolute pointing device (e.g. a tablet or touch screen
 protocol) only needs the system to advertise `WIRED_PTR_ABS` for its mode
 in `wired_ptr_caps()` (`main/adapter/wired/wired.c`) and to read the
 absolute position from the LX/LY axes, as the CD-i and the GunCon do. An output
 that can aim off the screen reads `CTRL_PTR_OFFSCREEN` in the controller's
-flags, set while the Wiimote sees no sensor bar. Guns that rely on the console sampling the light
-sensor against the beam (Zapper, Super Scope, Menacer, Justifier, ...) need
-console-side timing and are not covered.
+flags, set while the Wiimote sees no sensor bar. Guns whose sensor the
+console times against the beam (Zapper, Menacer, Justifier, ...) need the
+timing on the console's side, as the Super Scope does; `beam_timing.c` is a
+start for that.
 
 ## N64 keyboard and commands
 

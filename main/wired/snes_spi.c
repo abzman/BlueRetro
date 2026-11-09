@@ -22,6 +22,7 @@
 #include "adapter/config.h"
 #include "adapter/wired/npiso.h"
 #include "wired_bare.h"
+#include "beam_timing.h"
 #include "snes_spi.h"
 
 #define GPIO_INTR_NUM 19
@@ -145,6 +146,72 @@ static struct snes_ctrl_port snes_ctrl_ports[SNES_PORT_MAX] = {
     },
 };
 
+/* Super Scope (Gamepad Alt on port 2). Each poll builds the scope's report and, while Fire or
+ * Cursor is held on the screen, sets the time the beam will pass the aim in the next picture;
+ * the loop the CPU idles in (scope_loop) pulls IOBit low then, latching the PPU's H/V
+ * counters as the scope's light sensor would. */
+#define SCOPE_PULSE_CYCLES (2 * CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ)  /* 2 us low */
+#define SCOPE_REF_DOT 32        /* the poll window opens at dot 32.5 of the first V-Blank line */
+#define SCOPE_PIC_DOT 22        /* the picture's first dot */
+#define SCOPE_VBLANK_LINE 225   /* first V-Blank line, without overscan */
+#define SCOPE_PAL_US 18000      /* frames longer than this: PAL */
+
+static struct beam_timing scope_beam;
+static uint32_t scope_enabled;
+static volatile uint32_t scope_target;
+static volatile uint32_t scope_armed;
+static struct sscope_state scope_state;
+static uint8_t scope_prev;      /* held at the last poll */
+
+static void scope_poll(struct snes_ctrl_port *p, uint32_t now) {
+    struct npiso_scope_map *map = (struct npiso_scope_map *)wired_adapter.data[NPISO_SCOPE_PORT].output;
+    uint8_t held = map->held;
+    uint32_t xy = map->xy;
+    union {
+        uint8_t tmp[4];
+        uint32_t tmp32;
+    } raw = {0};
+
+    /* FCTP 00nN, then the 1111 1111 signature: a 1 is the line pulled low. The report is what
+     * was held at the previous poll, so the H/V latch of the frame in between matches it. */
+    raw.tmp[0] = ~sscope_report(&scope_state, scope_prev);
+    raw.tmp[1] = 0x00;
+    p->hw->data_buf[0] = raw.tmp32;
+    p->hw->data_buf[1] = 0;
+    scope_prev = held;
+
+    beam_timing_poll(&scope_beam, now);
+    if ((held & (NPISO_SCOPE_FIRE | NPISO_SCOPE_CURSOR)) && !(held & NPISO_SCOPE_OFFSCREEN)
+            && beam_timing_locked(&scope_beam)) {
+        uint32_t pal = beam_timing_period(&scope_beam) > SCOPE_PAL_US * CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ;
+        uint32_t lines_frame = pal ? 312 : 262;
+        /* the picture's first line is the first after the next V-Blank */
+        uint32_t lines = lines_frame - SCOPE_VBLANK_LINE + 1 + (xy >> 16);
+        int32_t dots = (int32_t)(xy & 0xFFFF) + SCOPE_PIC_DOT - SCOPE_REF_DOT;
+
+        scope_target = beam_timing_target(&scope_beam, lines, dots, lines_frame, 341);
+        __asm__ __volatile__("memw" ::: "memory");
+        scope_armed = 1;
+    }
+}
+
+/* Where the CPU waits once the driver is up: nothing else runs on it but the latch interrupt,
+ * which never comes during the picture, so the pulse lands within a few cycles of its time */
+static void scope_loop(void) {
+    while (1) {
+        if (scope_armed) {
+            uint32_t target = scope_target;
+            if ((int32_t)(xthal_get_ccount() - target) >= 0) {
+                GPIO.out_w1tc = P2_COPI_MASK;
+                uint32_t start = xthal_get_ccount();
+                while (xthal_get_ccount() - start < SCOPE_PULSE_CYCLES);
+                GPIO.out_w1ts = P2_COPI_MASK;
+                scope_armed = 0;
+            }
+        }
+    }
+}
+
 static inline void load_mouse_axes(uint8_t port, uint8_t *axes) {
     uint8_t *relative = (uint8_t *)(wired_adapter.data[port].output + 2);
     int32_t *raw_axes = (int32_t *)(wired_adapter.data[port].output + 4);
@@ -178,6 +245,7 @@ static inline void load_mouse_axes(uint8_t port, uint8_t *axes) {
 static inline void load_buffer(uint8_t port) {
     switch (config.out_cfg[port].dev_mode) {
         case DEV_PAD:
+        case DEV_PAD_ALT:   /* port 1: a pad; port 2: the Super Scope, see scope_poll */
         {
             union {
                 uint8_t tmp[8];
@@ -235,6 +303,7 @@ static inline void load_buffer(uint8_t port) {
 }
 
 static unsigned latch_isr(unsigned cause) {
+    const uint32_t now = xthal_get_ccount();
     const uint32_t low_io = GPIO.acpu_int;
     const uint32_t high_io = GPIO.acpu_int1.intr;
     struct snes_ctrl_port *p;
@@ -251,7 +320,12 @@ static unsigned latch_isr(unsigned cause) {
             p = &snes_ctrl_ports[port];
             int16_t bit_cnt = PCNT.cnt_unit[p->pcnt_id].cnt_val;
 
-            load_buffer(port);
+            if (port == NPISO_SCOPE_PORT && scope_enabled) {
+                scope_poll(p, now);
+            }
+            else {
+                load_buffer(port);
+            }
             p->hw->slave.sync_reset = 1;
             p->hw->slave.trans_done = 0;
             p->hw->cmd.usr = 1;
@@ -363,5 +437,27 @@ void snes_spi_init(uint32_t package) {
         pcnt_init(p->pcnt_id);
     }
 
+    if (npiso_is_scope(NPISO_SCOPE_PORT)) {
+        /* IOBit: open drain, so the scope only ever pulls it low against the console's pull-up */
+        GPIO.out_w1ts = P2_COPI_MASK;
+        io_conf.mode = GPIO_MODE_INPUT_OUTPUT_OD;
+        io_conf.intr_type = GPIO_INTR_DISABLE;
+        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+        io_conf.pin_bit_mask = 1ULL << P2_COPI_PIN;
+        gpio_config_iram(&io_conf);
+        esp_rom_gpio_connect_out_signal(P2_COPI_PIN, SIG_GPIO_OUT_IDX, false, false);
+        beam_timing_init(&scope_beam, CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ);
+        memset(&scope_state, 0, sizeof(scope_state));
+        scope_prev = 0;
+        scope_armed = 0;
+        scope_enabled = 1;
+    }
+
     intexc_alloc_iram(ETS_GPIO_INTR_SOURCE, GPIO_INTR_NUM, latch_isr);
+
+    if (scope_enabled) {
+        ets_printf("# Super Scope on port 2\n");
+        scope_loop();
+    }
 }
